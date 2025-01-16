@@ -193,9 +193,7 @@ def add_water_network(n, costs):
     """
     logger.info("Adding water")
 
-    n.add(
-        "Carrier", "H2O"
-    )  # TODO: water is not a carrier, not a bus and also not any of the other pypsa components ?
+    n.add("Carrier", "H2O")
     n.madd(
         "Bus",
         spatial.nodes + " H2O",
@@ -216,7 +214,8 @@ def add_water_network(n, costs):
             efficiency=costs.at["electrolysis", "efficiency"],
             efficiency2=costs.at["electrolysis", "efficiency"]
             * snakemake.config["sector"]["hydrogen"]["ratio_water_hydrogen"]
-            / 33,  # 33 kWh == 1 kg H2 (ratio_water_hydrogen is in liters per kg H2) % TODO: integrate ratio_water_elec in technology data
+            / 33
+            * 1000,  # 33 kWh == 1 kg H2 (ratio_water_hydrogen is in liters per kg H2) % Conversion from kWh to MWh TODO: integrate ratio_water_elec in technology data
             capital_cost=costs.at["electrolysis", "fixed"],
             lifetime=costs.at["electrolysis", "lifetime"],
         )
@@ -232,10 +231,42 @@ def add_water_network(n, costs):
             efficiency=costs.at["electrolysis", "efficiency"],
             efficiency2=costs.at["electrolysis", "efficiency"]
             * snakemake.config["sector"]["hydrogen"]["ratio_water_hydrogen"]
-            / 33,  # 33 kWh == 1 kg H2 (ratio_water_hydrogen is in liters per kg H2) % TODO: integrate ratio_water_elec in technology data
+            / 33
+            * 1000,  # 33 kWh == 1 kg H2 (ratio_water_hydrogen is in liters per kg H2) % Conversion from kWh to MWh TODO: integrate ratio_water_elec in technology data
             capital_cost=costs.at["electrolysis", "fixed"],
             lifetime=costs.at["electrolysis", "lifetime"],
         )
+
+    # DEVELOPMENT STAGE 1
+
+    n.madd(
+        "Generator",
+        spatial.nodes
+        + " H20",  # Output unit of generator is in liters, this is defined by the electrolysis.
+        bus=spatial.nodes + " H2O",
+        carrier="H2O",
+        p_nom_extendable=True,
+        # capital_cost
+        # marginal_cost
+        # life
+        efficiency=1,
+        lifetime=costs.at["seawater desalination", "lifetime"],
+    )
+
+    # DEVELOPMENT STAGE 2
+
+    # n.madd(
+    #     "Link",
+    #     spatial.nodes + " desalination",
+    #     bus0=spatial.nodes,
+    #     bus1=spatial.nodes + " H20",
+    #     carrier="desalination",
+    #     p_nom_extendable=True,
+    #     efficiency=costs.at["seawater desalination", "electricity-input"],
+    #     capital_cost=costs.at["seawater desalination", "fixed"],
+    #     marginal_cost=costs.at["seawater desalination", "FOM"],
+    #     lifetime=costs.at["seawater desalination", "lifetime"],
+    # )
 
 
 def add_hydrogen(n, costs):
