@@ -202,7 +202,7 @@ import numpy as np
 import pandas as pd
 import progressbar as pgb
 import xarray as xr
-from _helpers import BASE_DIR, configure_logging, create_logger, read_csv_nafix
+from _helpers import BASE_DIR, configure_logging, create_logger, read_csv_nafix, COPERNICUS_CRS
 from add_electricity import load_powerplants
 from dask.distributed import Client
 from pypsa.geo import haversine
