@@ -64,7 +64,7 @@ scenario:
     Co2L0.70, Co2L0.1, # DZ, 2035 GECO2024_15C for Algeria & Libya
     Co2L0.77, Co2L0.1, # MR, average
     ] 
-    # CO2 reductions rel. to 2015 are derived from modelled MtCO2eq pathways (fair share) presented by https://climateactiontracker.org/ and GECO Outlook 2024. Co2L for missing countries are average values or own assumptions. Lower limit for 2035 is set to 0.6. Values for 2050 are all set to 0.15.
+    # CO2 reductions rel. to 2015 are derived from modelled MtCO2eq pathways (fair share) presented by https://climateactiontracker.org/ and GECO Outlook 2024. Co2L for missing countries are average values or own assumptions. Lower limit for 2035 is set to 0.6. Values for 2050 are all set to 0.1.
     # Note: GECO2024_15C would allow significantly higher CO2 emissions for Rest Sub Saharan Africa compared to average.
   planning_horizons: # investment years for myopic and perfect; or costs year for overnight
   - 2035

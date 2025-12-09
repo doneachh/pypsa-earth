@@ -47,7 +47,7 @@ scenario:
   simpl: [""]
   ll: ["copt"]
   clusters: [10]
-  opts: [Co2L0.62, Co2L0.3] # TODO per country: adjust factor (e.g. Co2L0.8 for 2035) and co2base (see below) per country and planning_horizon based on excel file
+  opts: [Co2L0.62, Co2L0.1] # TODO per country: adjust factor (e.g. Co2L0.8 for 2035) and co2base (see below) per country and planning_horizon based on excel file
   planning_horizons: # investment years for myopic and perfect; or costs year for overnight
   - 2035
   - 2050
@@ -401,7 +401,7 @@ costs:
   - 2035
   - 2050
   technology_data_version: v0.13.2
-  discountrate: [0.082] #, 0.086, 0.071] --> https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2023/May/IRENA_The_cost_of_financing_renewable_power_2023.pdf
+  discountrate: [0.1046] #, 0.086, 0.071] --> https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2023/May/IRENA_The_cost_of_financing_renewable_power_2023.pdf
   country_specific_data: "" # (optional) Reference to the desired technology-data directory for techno-economic input data; Only "" and "US" supported, for other values check the technology-data output directory
   # Only needed if "US" is selected as `country_specific_data`, otherwise ignore
   cost_scenario: "moderate" # only used if `country_specific_data: "US"`; can be "moderate", "advanced" or "conservative"
@@ -439,8 +439,8 @@ costs:
   #   CCGT: 3.35
   # VOM: # EUR/MWh
   #   CCGT: 4.2
-  # fuel: # EUR/MWh
-  #   gas: 10.1
+  fuel: # EUR/MWh
+    solid biomass: 54.0 # https://www.nature.com/articles/s41560-024-01693-6
   # lifetime: # years
   #   CCGT: 25.0
   # efficiency: # per unit
@@ -706,7 +706,7 @@ sector:
 
   biomass_transport: false # biomass transport between nodes
   biomass_transport_default_cost: 0.1 #EUR/km/MWh
-  solid_biomass_potential: 285.3 # TWh/a, Potential of whole modelled area 
+  solid_biomass_potential: 338 # TWh/a, Potential of whole modelled area 
   # TODO per country: conservative assumptions is to take 97% of biofuel/bioenergy from https://unstats.un.org/unsd/energystats/dataPortal/, divide value by 3600 TJ/TWh
   biogas_potential: 8.8 # TWh/a, Potential of whole modelled area 
   # TODO per country: conservative assumptions is to take 3% of biofuel/bioenergy from https://unstats.un.org/unsd/energystats/dataPortal/, divide value by 3600 TJ/TWh
@@ -716,6 +716,7 @@ sector:
   efficiency_heat_gas_to_elec: 0.9
 
   electricity_distribution_grid: true # adds low voltage buses and shifts AC loads, BEVs, heat pumps, and resistive heaters, micro CHPs to low voltage buses if technologies are present
+  electricity_grid_connection: true # adds electricity grid connection costs to fixed capital costs for solar and onwind generators in prepare_sector_network.
   solar_rooftop: true # adds distribution side customer rooftop PV (only work if electricity_distribution_grid: true)
   home_battery: true # adds home batteries to low voltage buses ((only work if electricity_distribution_grid: true)
   transmission_efficiency:
