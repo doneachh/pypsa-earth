@@ -62,6 +62,7 @@ from _helpers import (
     create_logger,
     lossy_bidirectional_links,
     override_component_attrs,
+    read_csv_nafix,
     set_length_based_efficiency,
 )
 from add_electricity import (
@@ -276,6 +277,52 @@ def attach_hydrogen_pipelines(n, costs, config, transmission_efficiency):
     # set the pipelines efficiency and the electricity required by the pipeline for compression
     set_length_based_efficiency(n, "H2 pipeline", " H2", transmission_efficiency)
 
+def attach_extendable_generators(n, costs, pot):
+    elec_opts = snakemake.config["electricity"]
+    carriers = pd.Index(elec_opts["extendable_carriers"]["Generator"])
+
+    _add_missing_carriers_from_costs(n, costs, carriers)
+
+
+    for tech in carriers:
+        if tech.startswith("geothermal"):
+            pot["bus"] = pot.index
+            pot["Generator"] = pot.index.astype(str) + " " + tech
+            pot = pot.set_index("Generator")
+
+            pot_geothermal_buses = list(pot[pot["potential [MWel]"] != 0].index)
+            exist_geothermal_buses = list(n.generators[n.generators.carrier == tech].index)
+
+
+            inner_intersec = [pot_geothermal_buses[i] for i, index in enumerate(pot_geothermal_buses) if index in exist_geothermal_buses]
+
+            if len(inner_intersec)>0:
+                n.generators.loc[inner_intersec, "p_nom_max"] = pot.loc[inner_intersec, "potential [MWel]"]
+                diff = n.generators.loc[inner_intersec, "p_nom_max"] - n.generators.loc[inner_intersec, "p_nom_min"]
+                diff = diff[diff < 0]
+                n.generators.loc[diff.index, "p_nom_min"] += diff
+                n.generators.loc[diff.index, "p_nom"] += diff
+
+            outer_intersec = [pot_geothermal_buses[i] for i, index in enumerate(pot_geothermal_buses) if index not in exist_geothermal_buses]
+
+            n.madd(
+                "Generator",
+                outer_intersec,
+                bus=list(pot.loc[outer_intersec, "bus"].values),
+                carrier=tech,
+                p_nom_extendable=True,
+                p_nom=0.0,
+                p_nom_min=0.0,
+                p_nom_max = pot.loc[outer_intersec, "potential [MWel]"].values,
+                p_max_pu = 0.67,
+                capital_cost=costs.at["geothermal", "capital_cost"],
+                marginal_cost=costs.at["geothermal", "marginal_cost"],
+                efficiency=costs.at["geothermal", "efficiency"],
+            )
+            print(n.generators[n.generators.carrier == "geothermal"].p_max_pu)
+            n.generators.loc[n.generators.carrier == "geothermal", "p_max_pu"] = 0.67
+            print(n.generators[n.generators.carrier == "geothermal"].p_max_pu)
+
 
 if __name__ == "__main__":
     if "snakemake" not in globals():
@@ -298,9 +345,13 @@ if __name__ == "__main__":
         Nyears,
     )
 
+    # TODO: download geothermal potential automatically and read it in here
+    geothermal_pot = read_csv_nafix('PATH_TO_GEOTHERMAL_POTENTIAL.csv', index_col=["name"]).sort_index()
+
     attach_storageunits(n, costs, config)
     attach_stores(n, costs, config)
     attach_hydrogen_pipelines(n, costs, config, transmission_efficiency)
+    attach_extendable_generators(n, costs, geothermal_pot)
 
     add_nice_carrier_names(n, config=snakemake.config)
 
