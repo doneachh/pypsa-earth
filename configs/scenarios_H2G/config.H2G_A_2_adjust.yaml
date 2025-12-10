@@ -182,7 +182,7 @@ load_options:
   ssp: "ssp2-2.6" # shared socio-economic pathway (GDP and population growth) scenario to consider
   weather_year: 2013 # Load scenarios available with different weather year (different renewable potentials)
   prediction_year: 
-  - 2035 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon
+  - 2030 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon --> 2035 doesn't exist
   - 2050
   scale: 1 # scales all load time-series, i.e. 2 = doubles load
 
@@ -470,8 +470,8 @@ costs:
   #   CCGT: 3.35
   # VOM: # EUR/MWh
   #   CCGT: 4.2
-  fuel: # EUR/MWh
-    solid biomass: 54.0 # https://www.nature.com/articles/s41560-024-01693-6
+  # fuel: # EUR/MWh
+  #   solid biomass: 54.0 # https://www.nature.com/articles/s41560-024-01693-6
   # lifetime: # years
   #   CCGT: 25.0
   # efficiency: # per unit
@@ -661,7 +661,7 @@ sector:
       - offshore
     aqueduct_water_stress_classification: # ["above_40"] # If "True" then the water stress classification is used to determine the water availability for desalination
     hydrogen_colors: false
-    water_network: true
+    water_network: true # WHAT ABOUT ETHIOPIA WITH NO COASTLINE? There is one bus with water stress factor >40, rest below 40.
     custom_water_network: false
     ratio_water_hydrogen: 13 # liters of water per kg of hydrogen, see: https://www.plugpower.com/wp-content/uploads/2021/10/EX-4250D_F041122.pdf
     set_color_shares: false
