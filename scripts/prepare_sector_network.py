@@ -212,38 +212,6 @@ def add_water_network(n, costs):
     )
 
 
-    # DEVELOPMENT STAGE 1
-
-    # n.madd(
-    #     "Generator",
-    #     spatial.nodes
-    #     + " H2O",  # Output unit of generator is in liters, this is defined by the electrolysis.
-    #     bus=spatial.nodes + " H2O",
-    #     carrier="H2O",
-    #     p_nom_extendable=True,
-    #     # capital_cost
-    #     # marginal_cost
-    #     # life
-    #     efficiency=1,
-    #     lifetime=costs.at["seawater desalination", "lifetime"],
-    # )
-
-    # DEVELOPMENT STAGE 2
-
-    # n.madd(
-    #     "Link",
-    #     spatial.nodes + " desalination",
-    #     bus0=spatial.nodes,
-    #     bus1=spatial.nodes + " H20",
-    #     carrier="desalination",
-    #     p_nom_extendable=True,
-    #     efficiency=costs.at["seawater desalination", "electricity-input"],
-    #     capital_cost=costs.at["seawater desalination", "fixed"],
-    #     marginal_cost=costs.at["seawater desalination", "FOM"],
-    #     lifetime=costs.at["seawater desalination", "lifetime"],
-    # )
-
-
     n.add("Carrier", "seawater")
 
     water_network = gpd.read_file(snakemake.input.clustered_water_network)
@@ -937,11 +905,11 @@ def add_hydrogen(n, costs):
         h2_links = read_csv_nafix(snakemake.input.pipelines)
 
         # Order buses to detect equal pairs for bidirectional pipelines
-        buses_ordered = h2_links.apply(lambda p: sorted([p.bus0, p.bus1]), axis=1)
+        # buses_ordered = h2_links.apply(lambda p: sorted([p.bus0, p.bus1]), axis=1)
         if len(h2_links) > 0:
             # Appending string for carrier specification '_AC', because hydrogen has _AC in bus names
-            h2_links["bus0"] = buses_ordered.str[0] + "_AC"
-            h2_links["bus1"] = buses_ordered.str[1] + "_AC"
+            # h2_links["bus0"] = buses_ordered.str[0] + "_AC"
+            # h2_links["bus1"] = buses_ordered.str[1] + "_AC"
 
             # Create index column
             h2_links["buses_idx"] = (
