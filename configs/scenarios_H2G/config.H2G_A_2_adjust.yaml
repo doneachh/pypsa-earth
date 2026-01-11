@@ -204,19 +204,19 @@ electricity:
   voltages: [132., 220., 300., 380., 500., 750.]
   co2limit: 7.75e+7 # European default, 0.05 * 3.1e9*0.5, needs to be adjusted for Africa
   co2base:  # TODO per country: adjust using excel file and value for 2015 based on https://edgar.jrc.ec.europa.eu/dataset_ghg2024.
-    - 3.49e+6  # CD
-    - 252.55e+6 # EG
-    - 15.5e+6 # ET
-    - 15.79e+9 # GH
-    - 14.41e+6 # KE
-    - 63.80e+6 # MA
-    - 4.13e+6 # NA
-    - 121.21e+6 # NG
-    - 0.460e+9 # TN
-    - 30.72e+6 # TZ
-    - 460.05e+6 # ZA
-    - 2.74e+6 # MR
-    - 329.72e+6 # DZ
+    - 3.4909e+6   # CD  DR Congo
+    - 1.6486e+8   # DZ  Algeria
+    - 2.3939e+8   # EG  Egypt
+    - 1.3510e+7   # ET  Ethiopia
+    - 1.5788e+7   # GH  Ghana
+    - 1.7740e+7   # KE  Kenya
+    - 6.1131e+7   # MA  Morocco
+    - 2.7367e+6   # MR  Mauritania
+    - 4.1345e+6   # NA  Namibia
+    - 1.1761e+8   # NG  Nigeria
+    - 3.0718e+7   # TN  Tunisia
+    - 1.3203e+7   # TZ  Tanzania
+    - 4.6005e+8   # ZA  South Africa
   agg_p_nom_limits: # enables to set country-wise maximum and minimum generation capacities for generators (e.g. renewables, nuclear, and geothermal)
     file: data/agg_p_nom_minmax.csv # path to csv file containing country-wise generation capacity limits
     include_existing: false # false: only new built capacities are constrained; true: existing capacities are accounted in the constraints
