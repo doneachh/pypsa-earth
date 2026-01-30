@@ -1,0 +1,247 @@
+# Configuration for plot_summary.ipynb
+# This file centralizes all plotting configuration parameters
+
+# ============================================================================
+# RUN CONFIGURATION
+# ============================================================================
+run:
+  name_prefix: "scenarios_H2G"  # Experiment name prefix
+  summary_version: "v2"   # Summary directory version
+  
+# ============================================================================
+# DATA SELECTION
+# ============================================================================
+data:
+  countries: ['CD']  # Countries to plot: MA, EG, ZA
+  years: [2035]      # Years to include in analysis
+  
+  # Index levels to drop from multiindex when creating scenario labels
+  index_levels_to_drop:
+    - "simpl"
+    - "ll"
+    - "clusters"
+    - "opts"
+    - "demand"
+    - "sopts"
+    - "discountrate"
+    # - "eopts"
+    - "h2export"
+  
+  # Scenario filtering (set to false for no filtering, or list of scenario names)
+  scen_filter: false  # Example: ['AB', 'AT', 'AT-50EX', 'AT-0EX']
+  scen_order: []      # Custom ordering of scenarios in plots (empty = automatic)
+  
+  # Scenario column function to use: "H2G"
+  scen_col_function: "H2G"
+
+# ============================================================================
+# PLOT DIMENSIONS
+# ============================================================================
+plot:
+  width: 800
+  heights:
+    small: 300      # For single-variable charts (e.g., H2 capacity)
+    medium: 500     # For standard charts
+    large: 600      # For complex charts with many variables
+  
+  # Default figure keyword arguments (passed to plotly express)
+  default_kwargs:
+    x: "scen"
+    y: "value"
+    color: "variable"
+    facet_col: "year"
+    barmode: "relative"
+    text: "value"
+    text_auto: ".0f"
+
+# ============================================================================
+# CARRIER CONFIGURATIONS
+# ============================================================================
+carriers:
+  # Which carriers to load from balance_dict
+  balance:
+    - "AC"
+    - "H2"
+    - "oil"
+    - "gas"
+    - "co2 stored"
+    - "co2"
+    # - "NH3"
+    # - "HBI"
+  
+  # Which carriers to load from optimal_capacity_dict
+  capacity:
+    - "AC"
+    - "H2"
+    # - "HBI"
+  
+  # Which carriers to load from costs_dict
+  costs:
+    - "capex"
+    - "opex"
+
+# ============================================================================
+# CHART-SPECIFIC CONFIGURATIONS
+# ============================================================================
+charts:
+  electricity_supply:
+    carrier: "AC"
+    data_source: "balance"
+    chart_type: "bar"
+    split_supply_demand: true
+    show_supply: true
+    rename_function: "rename_electricity"
+    post_process: "rename_to_upper_case"
+    labels:
+      value: "Electricity supply [TWh<sub>el</sub>]"
+      year: ""
+      variable: ""
+      scen: ""
+    fig_name: "electricity_supply_TWh"
+    height: "medium"
+  
+  electricity_demand:
+    carrier: "AC"
+    data_source: "balance"
+    chart_type: "bar"
+    split_supply_demand: true
+    show_supply: false
+    rename_function: "rename_electricity"
+    post_process: "rename_to_upper_case"
+    labels:
+      value: "Electricity consumption [TWh<sub>el</sub>]"
+      year: ""
+      variable: ""
+      scen: ""
+    fig_name: "electricity_demand_TWh"
+    height: "medium"
+  
+  hydrogen_balance:
+    carrier: "H2"
+    data_source: "balance"
+    chart_type: "bar_with_negatives"
+    split_supply_demand: false
+    rename_function: "rename_h2"
+    labels:
+      value: "GH2 balance [TWh<sub>H2</sub>]"
+      year: ""
+      variable: ""
+      scen: ""
+    fig_name: "hydrogen_balance_TWh"
+    height: "medium"
+    add_legend_groups: true
+  
+  liquid_fuel_balance:
+    carrier: "oil"
+    data_source: "balance"
+    chart_type: "bar_with_negatives"
+    split_supply_demand: false
+    rename_function: "rename_oil"
+    filter_zeros: true
+    labels:
+      value: "Liquid fuel balance [TWh]"
+      year: ""
+      variable: ""
+      scen: ""
+    fig_name: "liquid_fuel_balance_TWh"
+    height: "medium"
+    add_legend_groups: true
+  
+  ch4_balance:
+    carrier: "gas"
+    data_source: "balance"
+    chart_type: "bar_with_negatives"
+    split_supply_demand: false
+    rename_function: "rename_gas"
+    labels:
+      value: "CH4 balance [TWh]"
+      year: ""
+      variable: ""
+      scen: ""
+    fig_name: "CH4_balance_TWh"
+    height: "medium"
+    add_legend_groups: true
+  
+  co2_stored_balance:
+    carrier: "co2 stored"
+    data_source: "balance"
+    chart_type: "bar_with_negatives"
+    split_supply_demand: false
+    rename_function: "rename_co2"
+    filter_zeros: true
+    labels:
+      value: "CO<sub>2</sub> Capture (+) and Usage (-) in Mt"
+      year: ""
+      scen: ""
+    fig_name: "CO2_capture_and_usage_Mt"
+    height: "medium"
+    add_legend_groups: false
+  
+  co2_emissions:
+    carrier: "co2"
+    data_source: "balance"
+    chart_type: "bar"
+    split_supply_demand: false
+    labels:
+      value: "CO2 emissions [Mt<sub>CO2</sub>]"
+      year: ""
+      scen: ""
+    fig_name: "co2_emissions_mt"
+    height: "medium"
+  
+  electricity_capacity:
+    carrier: "AC"
+    data_source: "capacity"
+    chart_type: "bar"
+    split_supply_demand: false
+    rename_function: "rename_electricity"
+    post_process: "rename_to_upper_case"
+    filter_threshold: 4000  # Drop load shedding capacity
+    labels:
+      value: "Installed capacity [GW<sub>el</sub>]"
+      year: ""
+      variable: ""
+      scen: ""
+    fig_name: "electricity_installed_capacity_GW"
+    height: "medium"
+  
+  hydrogen_capacity:
+    carrier: "H2"
+    data_source: "capacity"
+    chart_type: "bar_single"
+    split_supply_demand: false
+    rename_function: "rename_h2"
+    filter_threshold: 4000
+    labels:
+      value: "Installed capacity [GW<sub>H2</sub>]"
+      year: ""
+      variable: ""
+      scen: ""
+    fig_name: "hydrogen_installed_capacity_GW"
+    height: "small"
+    text_auto: ".1f"
+    color_discrete_map:
+      "H2 Electrolysis": "#179c7d"
+      "Steam reforming": "#d3c7ae"
+
+# ============================================================================
+# STYLING PRESETS
+# ============================================================================
+styling:
+  bar:
+    legend_traceorder: "reversed"
+    textposition: "inside"
+    textangle: 0
+    facet_annotation_cleanup: true  # Remove "year=" prefix from facet titles
+  
+  bar_with_negatives:
+    legend_traceorder: "normal"
+    textposition: "inside"
+    textangle: 0
+    facet_annotation_cleanup: true
+    add_production_consumption_groups: true
+  
+  bar_single:
+    legend_traceorder: "normal"
+    textposition: "auto"
+    facet_annotation_cleanup: true
