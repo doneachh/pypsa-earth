@@ -15,7 +15,7 @@ summary_dir: results/
 foresight: overnight # TODO: csp, myopic, monte carlo in szenario A zeigen
 
 
-countries: ["MR"]
+countries: ["AO"]
 # TODO per country: Insert country you want to model "EG", "NA", "MA", "ZA", "KE", "ET", "CG", "TZ", "GH", "TN", "NG"
 # Can be replaced by country ["NG", "BJ"], continent ["Africa"] or user-specific region, see more at https://pypsa-earth.readthedocs.io/en/latest/configuration.html#top-level-configuration
 
@@ -37,8 +37,8 @@ enable:
 custom_rules: [] # Default empty [] or link to custom rule file e.g. ["my_folder/my_rules.smk"] that add rules to Snakefile
 
 run:
-  name: "H2G_A_MR_2035" # use this to keep track of runs with different settings
-  sector_name: "H2G_A_MR_2035" # use this to keep track of sector scenario runs
+  name: "H2G_A_AO_2035" # use this to keep track of runs with different settings
+  sector_name: "H2G_A_AO_2035" # use this to keep track of sector scenario runs
   shared_cutouts: true # set to true to share the default cutout(s) across runs
   # Note: value false requires build_cutout to be enabled
   allow_scenario_failure: false # If True, the workflow will continue even if a scenario in run_scnenario fails
@@ -47,10 +47,10 @@ scenario:
   simpl: [""]
   ll: ["copt"]
   clusters: [10]
-  opts: [Co2L0.77] # TODO per country: adjust factor (e.g. Co2L0.8 for 2035) and co2base (see below) per country and planning_horizon based on excel file
+  opts: [Co2L0.77] # Co2L0.14 TODO per country: adjust factor (e.g. Co2L0.8 for 2035) and co2base (see below) per country and planning_horizon based on excel file
   planning_horizons: # investment years for myopic and perfect; or costs year for overnight
   - 2035
-  # - 2050
+  #- 2050
   sopts:
   - "3H"
   demand:
@@ -91,8 +91,8 @@ cluster_options:
     exclude_carriers: []
     remove_stubs: false
     remove_stubs_across_borders: true
-    p_threshold_drop_isolated: 0.01 # [MW] isolated buses are being discarded if bus mean power is below the specified threshold
-    p_threshold_merge_isolated: 0.01 # [MW] isolated buses are being merged into a single isolated bus if a bus mean power is below the specified threshold
+    p_threshold_drop_isolated: 1 # [MW] isolated buses are being discarded if bus mean power is below the specified threshold
+    p_threshold_merge_isolated: 1 # [MW] isolated buses are being merged into a single isolated bus if a bus mean power is below the specified threshold
     s_threshold_fetch_isolated: false # [-] a share of the national load for merging an isolated network into a backbone network
   cluster_network:
     algorithm: kmeans
@@ -154,7 +154,7 @@ build_osm_network: # Options of the build_osm_network script; osm = OpenStreetMa
   group_tolerance_buses: 5000 # [m] (default 5000) Tolerance in meters of the close buses to merge
   split_overpassing_lines: true # When True, lines overpassing buses are splitted and connected to the bueses
   overpassing_lines_tolerance: 1 # [m] (default 1) Tolerance to identify lines overpassing buses
-  force_ac: true # When true, it forces all components (lines and substation) to be AC-only. To be used if DC assets create problem.
+  force_ac: false # When true, it forces all components (lines and substation) to be AC-only. To be used if DC assets create problem.
 
 base_network:
   min_voltage_substation_offshore: 51000 # [V] minimum voltage of the offshore substations
@@ -163,7 +163,7 @@ base_network:
 load_options:
   ssp: "ssp2-2.6" # shared socio-economic pathway (GDP and population growth) scenario to consider
   weather_year: 2013 # Load scenarios available with different weather year (different renewable potentials)
-  prediction_year: 2035 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon
+  prediction_year: 2030 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon
   scale: 1 # scales all load time-series, i.e. 2 = doubles load
 
 co2_budget:
@@ -183,7 +183,7 @@ electricity:
   base_voltage: 380.
   voltages: [132., 220., 300., 380., 500., 750.]
   co2limit: 7.75e+7 # European default, 0.05 * 3.1e9*0.5, needs to be adjusted for Africa
-  co2base: 2.74e+6 # TODO per country: adjust using excel file and value for 2015 based on https://edgar.jrc.ec.europa.eu/dataset_ghg2024.
+  co2base: 460.05e+6 # TODO per country: adjust using excel file and value for 2015 based on https://edgar.jrc.ec.europa.eu/dataset_ghg2024.
   agg_p_nom_limits: # enables to set country-wise maximum and minimum generation capacities for generators (e.g. renewables, nuclear, and geothermal)
     file: data/agg_p_nom_minmax.csv # path to csv file containing country-wise generation capacity limits
     include_existing: false # false: only new built capacities are constrained; true: existing capacities are accounted in the constraints
@@ -699,9 +699,9 @@ sector:
 
   biomass_transport: false # biomass transport between nodes
   biomass_transport_default_cost: 0.1 #EUR/km/MWh
-  solid_biomass_potential: 9 # TWh/a, Potential of whole modelled area 
+  solid_biomass_potential: 100 # TWh/a, Potential of whole modelled area 
   # TODO per country: conservative assumptions is to take 97% of biofuel/bioenergy from https://unstats.un.org/unsd/energystats/dataPortal/, divide value by 3600 TJ/TWh
-  biogas_potential: 0.2 # TWh/a, Potential of whole modelled area 
+  biogas_potential: 1.3 # TWh/a, Potential of whole modelled area 
   # TODO per country: conservative assumptions is to take 3% of biofuel/bioenergy from https://unstats.un.org/unsd/energystats/dataPortal/, divide value by 3600 TJ/TWh
 
   efficiency_heat_oil_to_elec: 0.9

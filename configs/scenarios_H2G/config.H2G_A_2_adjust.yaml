@@ -109,8 +109,8 @@ cluster_options:
     exclude_carriers: []
     remove_stubs: false
     remove_stubs_across_borders: true
-    p_threshold_drop_isolated: 1 # [MW] isolated buses are being discarded if bus mean power is below the specified threshold
-    p_threshold_merge_isolated: 1 # [MW] isolated buses are being merged into a single isolated bus if a bus mean power is below the specified threshold
+    p_threshold_drop_isolated: 0.01 # [MW] isolated buses are being discarded if bus mean power is below the specified threshold
+    p_threshold_merge_isolated: 0.01 # [MW] isolated buses are being merged into a single isolated bus if a bus mean power is below the specified threshold
     s_threshold_fetch_isolated: false # [-] a share of the national load for merging an isolated network into a backbone network
   cluster_network:
     algorithm: kmeans
@@ -172,7 +172,7 @@ build_osm_network: # Options of the build_osm_network script; osm = OpenStreetMa
   group_tolerance_buses: 5000 # [m] (default 5000) Tolerance in meters of the close buses to merge
   split_overpassing_lines: true # When True, lines overpassing buses are splitted and connected to the bueses
   overpassing_lines_tolerance: 1 # [m] (default 1) Tolerance to identify lines overpassing buses
-  force_ac: false # When true, it forces all components (lines and substation) to be AC-only. To be used if DC assets create problem.
+  force_ac: true # When true, it forces all components (lines and substation) to be AC-only. To be used if DC assets create problem.
 
 base_network:
   min_voltage_substation_offshore: 51000 # [V] minimum voltage of the offshore substations

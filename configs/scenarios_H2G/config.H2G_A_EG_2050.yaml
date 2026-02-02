@@ -94,8 +94,8 @@ cluster_options:
     exclude_carriers: []
     remove_stubs: false
     remove_stubs_across_borders: true
-    p_threshold_drop_isolated: 1 # [MW] isolated buses are being discarded if bus mean power is below the specified threshold
-    p_threshold_merge_isolated: 1 # [MW] isolated buses are being merged into a single isolated bus if a bus mean power is below the specified threshold
+    p_threshold_drop_isolated: 0.01 # [MW] isolated buses are being discarded if bus mean power is below the specified threshold
+    p_threshold_merge_isolated: 0.01 # [MW] isolated buses are being merged into a single isolated bus if a bus mean power is below the specified threshold
     s_threshold_fetch_isolated: false # [-] a share of the national load for merging an isolated network into a backbone network
   cluster_network:
     algorithm: kmeans
@@ -157,7 +157,7 @@ build_osm_network: # Options of the build_osm_network script; osm = OpenStreetMa
   group_tolerance_buses: 5000 # [m] (default 5000) Tolerance in meters of the close buses to merge
   split_overpassing_lines: true # When True, lines overpassing buses are splitted and connected to the bueses
   overpassing_lines_tolerance: 1 # [m] (default 1) Tolerance to identify lines overpassing buses
-  force_ac: false # When true, it forces all components (lines and substation) to be AC-only. To be used if DC assets create problem.
+  force_ac: true # When true, it forces all components (lines and substation) to be AC-only. To be used if DC assets create problem.
 
 base_network:
   min_voltage_substation_offshore: 51000 # [V] minimum voltage of the offshore substations
@@ -514,10 +514,7 @@ export:
   endogenous_price: 400 # EUR/MWh # Market price, for wich the hydrogen for endogenous exports is sold. Only considered, if ["export"]["endogenous"] is set to true.
   store: true # [True, False] # specifies whether an export store to balance demand is implemented
   store_capital_costs: "no_costs" # ["standard_costs", "no_costs"] # specifies the costs of the export store. "standard_costs" takes CAPEX of "hydrogen storage tank type 1 including compressor"
-  h2export: [
-    # 3.33, 13.33, 23.33, 
-    23.33, 78.33, 133.32
-    ] # Yearly export demand in TWh. Only considered, if ["export"]["endogenous"] is set to false
+  h2export: [23.33, 78.33, 133.32] # Yearly export demand in TWh. Only considered, if ["export"]["endogenous"] is set to false
   # Assumptions: Africas market-based export potential (shipped and piped) is 4 to 10 MtH2 by 2035 and 35(6) to 50 MtH2 via different products by 2050. (cf. Deloitte2023, HydrogenCouncil2024, HydrogenCouncil2022, IRENA2023) 
   # 0.1 Mtpa: 3.33 TWh/a and about 1GW of electrolyser capacity as a lower bound for 2035.
   # 0.4 Mtpa: 13.33 TWh/a and about 3GW of electrolyser capacity as a lower bound for 2035.
