@@ -92,12 +92,14 @@ def set_scen_col_H2G(df, index_levels_to_drop=[]):
     """
     df = df.copy()
     
-    demand_info = df["demand"]#.map({"Exp": ""})
+    country_info = df["country"]
+
+    # demand_info = df["demand"]#.map({"Exp": ""})
 
     # Add export info based on 'eopts', handling NaN and string values
-    export_info = df["h2export"].astype(str)
+    export_info = df["h2export"].astype(float).div(33.33).round(1).astype(str) + "MtH2export"
 
-    df["scen"] = demand_info + export_info
+    df["scen"] = country_info + "-" + export_info
 
     df = df.drop(columns=index_levels_to_drop) #"ll"
     #df["scen"] = df.apply(lambda row: "_".join([f"{col}_{row[col]}" for col in df.columns if col not in cols_to_ignore]), axis=1)
