@@ -65,7 +65,13 @@ import numpy as np
 import pandas as pd
 import pypsa
 import requests
-from _helpers import BASE_DIR, configure_logging, create_logger
+from _helpers import (
+    BASE_DIR,
+    configure_logging,
+    create_logger,
+    sanitize_carriers,
+    sanitize_locations,
+)
 from add_electricity import load_costs, update_transmission_costs
 
 idx = pd.IndexSlice
@@ -184,7 +190,7 @@ def set_line_s_max_pu(n, s_max_pu):
     logger.info(f"N-1 security margin of lines set to {s_max_pu}")
 
 
-def set_transmission_limit(n, ll_type, factor, costs, Nyears=1):
+def set_transmission_limit(n, ll_type, factor, costs, lines, links):
     links_dc_b = n.links.carrier == "DC" if not n.links.empty else pd.Series()
 
     _lines_s_nom = (
@@ -210,7 +216,12 @@ def set_transmission_limit(n, ll_type, factor, costs, Nyears=1):
         n.links.loc[links_dc_b, "p_nom_min"] = n.links.loc[links_dc_b, "p_nom"]
         n.links.loc[links_dc_b, "p_nom_extendable"] = True
 
-    if factor != "opt":
+    if ll_type == "l":
+        n.lines["s_nom_max"] = n.lines["s_nom"] * float(factor)
+        n.links.loc[links_dc_b, "p_nom_max"] = n.links.loc[links_dc_b, "p_nom"] * float(
+            factor
+        )
+    elif factor != "opt":  # implicitly also ll_type != "l"
         con_type = "expansion_cost" if ll_type == "c" else "volume_expansion"
         rhs = float(factor) * ref
         n.add(
@@ -221,6 +232,9 @@ def set_transmission_limit(n, ll_type, factor, costs, Nyears=1):
             constant=rhs,
             carrier_attribute="AC, DC",
         )
+
+    set_line_nom_max(n, lines, links)
+
     return n
 
 
@@ -256,13 +270,13 @@ def apply_time_segmentation(n, segments, solver_name):
             "Optional dependency 'tsam' not found." "Install via 'pip install tsam'"
         )
 
-    p_max_pu_norm = n.generators_t.p_max_pu.max()
+    p_max_pu_norm = n.generators_t.p_max_pu.abs().max().clip(lower=1e-6)
     p_max_pu = n.generators_t.p_max_pu / p_max_pu_norm
 
-    load_norm = n.loads_t.p_set.max()
+    load_norm = n.loads_t.p_set.abs().max().clip(lower=1e-6)
     load = n.loads_t.p_set / load_norm
 
-    inflow_norm = n.storage_units_t.inflow.max()
+    inflow_norm = n.storage_units_t.inflow.abs().max().clip(lower=1e-6)
     inflow = n.storage_units_t.inflow / inflow_norm
 
     raw = pd.concat([p_max_pu, load, inflow], axis=1, sort=False)
@@ -310,9 +324,11 @@ def enforce_autarky(n, only_crossborder=False):
     n.mremove("Link", links_rm)
 
 
-def set_line_nom_max(n, s_nom_max_set=np.inf, p_nom_max_set=np.inf):
-    n.lines.s_nom_max = n.lines.s_nom_max.clip(upper=s_nom_max_set)
-    n.links.p_nom_max = n.links.p_nom_max.clip(upper=p_nom_max_set)
+def set_line_nom_max(n, lines, links):
+    s_max, s_min = lines.get("s_nom_max"), lines.get("s_nom_max_min")
+    p_max, p_min = links.get("p_nom_max"), links.get("p_nom_max_min")
+    n.lines.s_nom_max = n.lines.s_nom_max.clip(lower=s_min, upper=s_max)
+    n.links.p_nom_max = n.links.p_nom_max.clip(lower=p_min, upper=p_max)
 
 
 if __name__ == "__main__":
@@ -325,7 +341,7 @@ if __name__ == "__main__":
             clusters="4",
             ll="c1",
             opts="Co2L-4H",
-            configfile="test/config.sector.yaml",
+            # configfile="test/config.sector.yaml",
         )
 
     configure_logging(snakemake)
@@ -392,51 +408,50 @@ if __name__ == "__main__":
                 add_gaslimit(n, snakemake.params.electricity.get("gaslimit"), Nyears)
                 logger.info("Setting gas usage limit according to config value.")
 
-        for o in opts:
-            oo = o.split("+")
-            suptechs = map(lambda c: c.split("-", 2)[0], n.carriers.index)
-            if oo[0].startswith(tuple(suptechs)):
-                carrier = oo[0]
-                # handles only p_nom_max as stores and lines have no potentials
-                attr_lookup = {
-                    "p": "p_nom_max",
-                    "c": "capital_cost",
-                    "m": "marginal_cost",
-                }
-                attr = attr_lookup[oo[1][0]]
-                factor = float(oo[1][1:])
-                if carrier == "AC":  # lines do not have carrier
-                    n.lines[attr] *= factor
-                else:
-                    comps = {"Generator", "Link", "StorageUnit", "Store"}
-                    for c in n.iterate_components(comps):
-                        sel = c.df.carrier.str.contains(carrier)
-                        c.df.loc[sel, attr] *= factor
+    for o in opts:
+        oo = o.split("+")
+        suptechs = map(lambda c: c.split("-", 2)[0], n.carriers.index)
+        if oo[0].startswith(tuple(suptechs)):
+            carrier = oo[0]
+            # handles only p_nom_max as stores and lines have no potentials
+            attr_lookup = {
+                "p": "p_nom_max",
+                "c": "capital_cost",
+                "m": "marginal_cost",
+            }
+            attr = attr_lookup[oo[1][0]]
+            factor = float(oo[1][1:])
+            if carrier == "AC":  # lines do not have carrier
+                n.lines[attr] *= factor
+            else:
+                comps = {"Generator", "Link", "StorageUnit", "Store"}
+                for c in n.iterate_components(comps):
+                    sel = c.df.carrier.str.contains(carrier)
+                    c.df.loc[sel, attr] *= factor
 
-        for o in opts:
-            if "Ep" in o:
-                m = re.findall("[0-9]*\.?[0-9]+$", o)
-                if len(m) > 0:
-                    logger.info("Setting emission prices according to wildcard value.")
-                    add_emission_prices(n, dict(co2=float(m[0])))
-                else:
-                    logger.info("Setting emission prices according to config value.")
-                    add_emission_prices(n, snakemake.params.costs["emission_prices"])
-                break
+    for o in opts:
+        if "Ep" in o:
+            m = re.findall("[0-9]*\.?[0-9]+$", o)
+            if len(m) > 0:
+                logger.info("Setting emission prices according to wildcard value.")
+                add_emission_prices(n, dict(co2=float(m[0])))
+            else:
+                logger.info("Setting emission prices according to config value.")
+                add_emission_prices(n, snakemake.params.costs["emission_prices"])
+            break
 
     ll_type, factor = snakemake.wildcards.ll[0], snakemake.wildcards.ll[1:]
-    set_transmission_limit(n, ll_type, factor, costs, Nyears)
-
-    set_line_nom_max(
-        n,
-        s_nom_max_set=snakemake.params.lines.get("s_nom_max,", np.inf),
-        p_nom_max_set=snakemake.params.links.get("p_nom_max,", np.inf),
-    )
+    lines = snakemake.params.lines
+    links = snakemake.params.links
+    set_transmission_limit(n, ll_type, factor, costs, lines, links)
 
     if "ATK" in opts:
         enforce_autarky(n)
     elif "ATKc" in opts:
         enforce_autarky(n, only_crossborder=True)
+
+    sanitize_carriers(n, snakemake.config)
+    sanitize_locations(n)
 
     n.meta = dict(snakemake.config, **dict(wildcards=dict(snakemake.wildcards)))
     n.export_to_netcdf(snakemake.output[0])
