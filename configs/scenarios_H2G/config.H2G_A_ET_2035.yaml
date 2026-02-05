@@ -623,7 +623,7 @@ sector:
       - offshore
     aqueduct_water_stress_classification: # ["above_40"] # If "True" then the water stress classification is used to determine the water availability for desalination
     hydrogen_colors: false
-    water_network: true
+    water_network: false
     custom_water_network: false
     ratio_water_hydrogen: 13 # liters of water per kg of hydrogen, see: https://www.plugpower.com/wp-content/uploads/2021/10/EX-4250D_F041122.pdf
     set_color_shares: false
