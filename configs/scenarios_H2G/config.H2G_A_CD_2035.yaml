@@ -165,7 +165,7 @@ base_network:
 load_options:
   ssp: "ssp2-2.6" # shared socio-economic pathway (GDP and population growth) scenario to consider
   weather_year: 2013 # Load scenarios available with different weather year (different renewable potentials)
-  prediction_year: 2035 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon
+  prediction_year: 2030 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon
   scale: 1 # scales all load time-series, i.e. 2 = doubles load
 
 co2_budget:
