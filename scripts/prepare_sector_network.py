@@ -425,7 +425,7 @@ def add_hydrogen(n: pypsa.Network, costs: pd.DataFrame) -> None:
         lifetime=costs.at["fuel cell", "lifetime"],
     )
 
-    if snakemake.params.sector["hydrogen"].get("h2_turbine", False):
+    if snakemake.params.sector_options["hydrogen"].get("h2_turbine", False):
         # Assumption:
         # Hydrogen turbines are approximated using OCGT techno-economic parameters,
         # as both represent open-cycle gas turbines.
