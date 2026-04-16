@@ -1154,12 +1154,13 @@ rule prepare_transport_data_input:
     script:
         "scripts/prepare_transport_data_input.py"
 
+
 rule retrieve_potash_data:
     input:
         potash_zip=HTTP.remote(
-                "https://pubs.usgs.gov/sir/2010/5090/s/PotashGIS.zip",
-                keep_local=True,
-            ),
+            "https://pubs.usgs.gov/sir/2010/5090/s/PotashGIS.zip",
+            keep_local=True,
+        ),
     output:
         potash_dir=directory("data/potash_gis/PotashGIS/global_potash"),
         potash_files="data/potash_gis/PotashGIS/global_potash/Shapefiles/PotashTracts.shp",
