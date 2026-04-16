@@ -1086,7 +1086,17 @@ rule retrieve_potash_data:
     params:
         url="https://pubs.usgs.gov/sir/2010/5090/s/PotashGIS.zip",
     script:
-        "scripts/retrieve_potash_data.py"
+rule retrieve_potash_data:
+    input: 
+        potash_zip=HTTP.remote(
+                "https://pubs.usgs.gov/sir/2010/5090/s/PotashGIS.zip",
+                keep_local=True,
+            ),
+    output:
+        potash_dir=directory("data/potash_gis/PotashGIS/global_potash"),
+        potash_files="data/potash_gis/PotashGIS/global_potash/Shapefiles/PotashTracts.shp",
+    run:
+        unpack_archive(input["potash_zip"], output["potash_dir"])
 
 
 if (
