@@ -1162,7 +1162,7 @@ rule retrieve_potash_data:
         url="https://pubs.usgs.gov/sir/2010/5090/s/PotashGIS.zip",
     script:
 rule retrieve_potash_data:
-    input: 
+    input:
         potash_zip=HTTP.remote(
                 "https://pubs.usgs.gov/sir/2010/5090/s/PotashGIS.zip",
                 keep_local=True,
