@@ -425,19 +425,24 @@ def add_hydrogen(n: pypsa.Network, costs: pd.DataFrame) -> None:
         lifetime=costs.at["fuel cell", "lifetime"],
     )
 
-    n.madd(
-        "Link",
-        spatial.nodes + " H2 turbine",
-        bus0=spatial.nodes + " H2",
-        bus1=spatial.nodes,
-        p_nom_extendable=True,
-        carrier="H2 turbine",
-        efficiency=costs.at["OCGT", "efficiency"],
-        capital_cost=costs.at["OCGT", "fixed"]
-        * costs.at["OCGT", "efficiency"],  # NB: fixed cost is per MWel
-        marginal_cost=costs.at["OCGT", "VOM"],
-        lifetime=costs.at["OCGT", "lifetime"],
-    )
+    if snakemake.params.sector["hydrogen"].get("h2_turbine", False):
+        # Assumption:
+        # Hydrogen turbines are approximated using OCGT techno-economic parameters,
+        # as both represent open-cycle gas turbines.
+        # This is a proxy due to limited data availability for dedicated H2 turbines (didn't find suitable in technology data).
+        n.madd(
+            "Link",
+            spatial.nodes + " H2 turbine",
+            bus0=spatial.nodes + " H2",
+            bus1=spatial.nodes,
+            p_nom_extendable=True,
+            carrier="H2 turbine",
+            efficiency=costs.at["OCGT", "efficiency"],
+            capital_cost=costs.at["OCGT", "fixed"]
+            * costs.at["OCGT", "efficiency"],  # NB: fixed cost is per MWel
+            marginal_cost=costs.at["OCGT", "VOM"],
+            lifetime=costs.at["OCGT", "lifetime"],
+        )
 
     if snakemake.params.sector_options["hydrogen"]["underground_storage"]["enabled"]:
         if snakemake.params.h2_underground:
@@ -3172,7 +3177,7 @@ if __name__ == "__main__":
             simpl="",
             clusters="4",
             ll="c1",
-            opts="Co2L4H",
+            opts="Co2L-4H",
             planning_horizons="2030",
             sopts="144H",
             discountrate=0.071,
