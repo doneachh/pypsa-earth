@@ -17,5 +17,3 @@ Scripts for downloading and preparing input data.
 ::: scripts.clean_osm_data
 
 ::: scripts.build_osm_network
-
-::: scripts.retrieve_potash_data
