@@ -77,7 +77,12 @@ def capsule_volume(diameter_m: float, height_m: float) -> float:
 
 
 def compute_physical_capacity(
-    diameter_m: float, height_m: float, rho_min: float, rho_max: float, theta_safety: float, lhv_h2: float
+    diameter_m: float,
+    height_m: float,
+    rho_min: float,
+    rho_max: float,
+    theta_safety: float,
+    lhv_h2: float,
 ) -> float:
     """
     Compute the physical hydrogen storage energy capacity of an underground cavern.
@@ -179,7 +184,9 @@ def classify_salt_type(gdf: gpd.GeoDataFrame) -> pd.Series:
     return gdf["salt_type"]
 
 
-def apply_landuse_exclusions(gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def apply_landuse_exclusions(
+    gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
     """
     Apply land-use exclusion zones to underground salt storage areas.
 
@@ -239,13 +246,9 @@ def apply_landuse_exclusions(gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame) -
 
         if not np.any(mask):
             return gdf.to_crs(geo_crs)
-        
+
         # Single vectorization step, preserving raster values
-        shapes_gen = rasterio.features.shapes(
-            clc.data,
-            mask=mask,
-            transform=transform
-        )
+        shapes_gen = rasterio.features.shapes(clc.data, mask=mask, transform=transform)
 
         exclusion_geoms = []
 
@@ -276,7 +279,9 @@ def apply_landuse_exclusions(gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame) -
     return gdf.to_crs(geo_crs)
 
 
-def estimate_h2_potential_from_potash(potash_gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame, min_area_km2: float = 13.0) -> gpd.GeoDataFrame:
+def estimate_h2_potential_from_potash(
+    potash_gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame, min_area_km2: float = 13.0
+) -> gpd.GeoDataFrame:
     """
     Estimate technical hydrogen storage potential from potash deposits.
 
@@ -447,7 +452,9 @@ def area(gdf: gpd.GeoDataFrame) -> pd.Series:
     return gdf.to_crs(area_crs).area / 1e6  # in km²
 
 
-def salt_cavern_potential_by_region(cavern: gpd.GeoDataFrame, regions: gpd.GeoDataFrame) -> pd.DataFrame:
+def salt_cavern_potential_by_region(
+    cavern: gpd.GeoDataFrame, regions: gpd.GeoDataFrame
+) -> pd.DataFrame:
     """
     Aggregate salt cavern hydrogen storage potentials by region.
 
