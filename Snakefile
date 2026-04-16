@@ -9,7 +9,7 @@ import pathlib
 
 sys.path.append("./scripts")
 
-from shutil import copyfile, move
+from shutil import copyfile, move, unpack_archive
 
 from snakemake.remote.HTTP import RemoteProvider as HTTPRemoteProvider
 
