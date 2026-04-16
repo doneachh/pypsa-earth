@@ -1165,7 +1165,7 @@ rule retrieve_potash_data:
         potash_dir=directory("data/potash_gis/PotashGIS/global_potash"),
         potash_files="data/potash_gis/PotashGIS/global_potash/Shapefiles/PotashTracts.shp",
     run:
-        unpack_archive(input["potash_zip"], output["potash_dir"])
+        unpack_archive(str(input.potash_zip), output["potash_dir"])
 
 
 if (
