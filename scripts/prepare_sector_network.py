@@ -430,6 +430,7 @@ def add_hydrogen(n: pypsa.Network, costs: pd.DataFrame) -> None:
         # Hydrogen turbines are approximated using OCGT techno-economic parameters,
         # as both represent open-cycle gas turbines.
         # This is a proxy due to limited data availability for dedicated H2 turbines (didn't find suitable in technology data).
+        # TODO: Update with dedicated H2 turbine parameters when available.
         n.madd(
             "Link",
             spatial.nodes + " H2 turbine",
