@@ -35,7 +35,6 @@ import numpy as np
 import pandas as pd
 import pypsa
 from _helpers import configure_logging, create_logger
-from add_electricity import load_costs
 from networkx.algorithms import complement
 from networkx.algorithms.connectivity.edge_augmentation import k_edge_augmentation
 from pypsa.geo import haversine_pts
@@ -55,7 +54,7 @@ if __name__ == "__main__":
         from _helpers import mock_snakemake
 
         snakemake = mock_snakemake(
-            "augmented_line_connections", network="elec", simpl="", clusters="1"
+            "augmented_line_connections", network="elec", simpl="", clusters="4"
         )
 
     configure_logging(snakemake)
@@ -65,18 +64,15 @@ if __name__ == "__main__":
     clusters = str(getattr(snakemake.wildcards, "clusters", ""))
     ac_buses = n.buses.index[n.buses.carrier == "AC"]
     if clusters == "1" or len(ac_buses) < 2:
-        logger.info(f"Skipping augmentation (clusters={clusters}, AC buses={len(ac_buses)}).")
+        logger.info(
+            f"Skipping augmentation (clusters={clusters}, AC buses={len(ac_buses)})."
+        )
         n.meta = dict(snakemake.config, **dict(wildcards=dict(snakemake.wildcards)))
         n.export_to_netcdf(snakemake.output.network)
         raise SystemExit(0)
 
     Nyears = n.snapshot_weightings.sum().values[0] / 8760.0
-    costs = load_costs(
-        snakemake.input.tech_costs,
-        snakemake.params.costs,
-        snakemake.params.electricity,
-        Nyears,
-    )
+    costs = pd.read_csv(snakemake.input.tech_costs, index_col=0)
     # TODO: Implement below comment in future. Requires transformer consideration.
     # component_type = {"False": "Line", "True":  "Link"}.get(snakemake.params.hvdc_as_lines)
     options = snakemake.params.augmented_line_connection

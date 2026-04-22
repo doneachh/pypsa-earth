@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-version: 0.7.0
 logging_level: INFO
 tutorial: true
 
@@ -26,7 +25,9 @@ disable_subworkflow: true
 scenario:
   simpl: [""]
   clusters: [4]
-  planning_horizons: [2030] # investment years for myopcondaic and perfect; or costs year for overnight
+  planning_horizons:
+  - 2030
+  - 2050
   ll: ["c1"]
   opts: ["Co2L-24H"]
   sopts: ["144h"]

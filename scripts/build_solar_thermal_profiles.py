@@ -21,8 +21,8 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "build_solar_thermal_profiles",
             simpl="",
-            clusters="1",
-            planning_horizons="2050",
+            clusters="4",
+            planning_horizons="2030",
         )
 
     config = snakemake.params.solar_thermal_config
@@ -31,10 +31,7 @@ if __name__ == "__main__":
     cutout_config = snakemake.input.cutout
     cutout = atlite.Cutout(cutout_config).sel(time=time)
 
-    regions_gdf = (
-        gpd.read_file(snakemake.input.regions_onshore)
-        .set_index("name")
-    )
+    regions_gdf = gpd.read_file(snakemake.input.regions_onshore).set_index("name")
 
     clustered_regions = regions_gdf.geometry.buffer(0)
 

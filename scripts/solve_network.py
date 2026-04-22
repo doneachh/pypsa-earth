@@ -86,7 +86,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 import xarray as xr
-from _helpers import configure_logging, create_logger, override_component_attrs
+from _helpers import configure_logging, create_logger
 from linopy import merge
 from pypsa.descriptors import get_switchable_as_dense as get_as_dense
 from pypsa.optimization.abstract import optimize_transmission_expansion_iteratively
@@ -316,7 +316,7 @@ def add_EQ_constraints(n, o, scaling=1e-1):
     to produce on average at least 70% of its consumption; EQ0.7 demands
     each node to produce on average at least 70% of its consumption.
     """
-    float_regex = "[0-9]*\.?[0-9]+"
+    float_regex = r"[0-9]*\.?[0-9]+"
     level = float(re.findall(float_regex, o)[0])
     if o[-1] == "c":
         ggrouper = n.generators.bus.map(n.buses.country)
@@ -645,7 +645,7 @@ def add_land_use_constraint(n):
 def _add_land_use_constraint(n):
     # warning: this will miss existing offwind which is not classed AC-DC and has carrier 'offwind'
 
-    for carrier in ["solar", "onwind", "offwind-ac", "offwind-dc"]:
+    for carrier in ["solar", "solar rooftop", "onwind", "offwind-ac", "offwind-dc"]:
         existing = (
             n.generators.loc[n.generators.carrier == carrier, "p_nom"]
             .groupby(n.generators.bus.map(n.buses.location))
@@ -656,6 +656,21 @@ def _add_land_use_constraint(n):
 
     n.generators.p_nom_max.clip(lower=0, inplace=True)
 
+    # Where land use constraint reduces p_nom_max below p_nom / p_nom_min,
+    # cap both down to p_nom_max to remain feasible.
+    # This happens when existing capacity already exceeds the land use budget.
+    violating = n.generators.p_nom_min > n.generators.p_nom_max
+    if violating.any():
+        logger.warning(
+            f"Land use constraint reduced p_nom_max below p_nom/p_nom_min for "
+            f"{violating.sum()} generators. Capping p_nom and p_nom_min to p_nom_max:\n"
+            f"{n.generators.index[violating].tolist()}"
+        )
+        n.generators.loc[violating, "p_nom_min"] = n.generators.loc[
+            violating, "p_nom_max"
+        ]
+        n.generators.loc[violating, "p_nom"] = n.generators.loc[violating, "p_nom_max"]
+
 
 def _add_land_use_constraint_m(n):
     # if generators clustering is lower than network clustering, land_use accounting is at generators clusters
@@ -664,7 +679,7 @@ def _add_land_use_constraint_m(n):
     grouping_years = snakemake.config["existing_capacities"]["grouping_years"]
     current_horizon = snakemake.wildcards.planning_horizons
 
-    for carrier in ["solar", "onwind", "offwind-ac", "offwind-dc"]:
+    for carrier in ["solar", "solar rooftop", "onwind", "offwind-ac", "offwind-dc"]:
         existing = n.generators.loc[n.generators.carrier == carrier, "p_nom"]
         ind = list(
             set(
@@ -701,7 +716,7 @@ def add_h2_network_cap(n, cap):
     h2_network_cap = n.model["Link-p_nom"]
     h2_network_cap_index = h2_network_cap.indexes["Link-ext"]
     subset_index = h2_network.index.intersection(h2_network_cap_index)
-    diff_index = h2_network_cap_index.difference(subset_index)
+    diff_index = h2_network.index.difference(subset_index)
     if len(diff_index) > 0:
         logger.warning(
             f"Impossible to set a limit for H2 pipelines extension for the following links: {diff_index}"
@@ -1040,7 +1055,7 @@ def extra_functionality(n, snapshots):
         add_operational_reserve_margin(n, snapshots, config)
     for o in opts:
         if "RES" in o:
-            res_share = float(re.findall("[0-9]*\.?[0-9]+$", o)[0])
+            res_share = float(re.findall(r"[0-9]*\.?[0-9]+$", o)[0])
             add_RES_constraints(n, res_share, config)
     for o in opts:
         if "EQ" in o:
@@ -1147,15 +1162,15 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "solve_sector_network",
             simpl="",
-            clusters="1",
-            ll="copt",
-            opts="Co2L0.78",
-            planning_horizons="2050",
-            discountrate="0.094",
-            demand="NZ",
-            sopts="3H",
-            h2export="199.8",
-            configfile="config.yaml",
+            clusters="4",
+            ll="c1",
+            opts="Co2L-4H",
+            planning_horizons="2030",
+            discountrate="0.071",
+            demand="AB",
+            sopts="144H",
+            h2export="120",
+            configfile="config.tutorial.yaml",
         )
 
     configure_logging(snakemake)
@@ -1165,8 +1180,7 @@ if __name__ == "__main__":
 
     is_sector_coupled = "sopts" in snakemake.wildcards.keys()
 
-    overrides = override_component_attrs(snakemake.input.overrides)
-    n = pypsa.Network(snakemake.input.network, override_component_attrs=overrides)
+    n = pypsa.Network(snakemake.input.network)
 
     if snakemake.params.augmented_line_connection.get("add_to_snakefile"):
         if not n.lines.empty:

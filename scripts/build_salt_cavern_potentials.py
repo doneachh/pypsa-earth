@@ -1,8 +1,25 @@
+# SPDX-FileCopyrightText: PyPSA-Earth and PyPSA-Eur Authors
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # -*- coding: utf-8 -*-
 """
-Build salt cavern potentials for hydrogen storage.
+# Build salt cavern potentials for hydrogen storage.
 
-https://doi.org/10.3133/sir20105090S
+https://dx.doi.org/10.2139/ssrn.6307406
+
+This module computes the technical hydrogen storage potential in underground
+salt caverns based on global potash deposit data.
+
+The workflow performs:
+
+- classification of salt deposits
+- land-use exclusion filtering
+- cavern capacity estimation
+- aggregation to PyPSA bus regions
+
+The resulting dataset provides hydrogen storage potentials in **GWh per region**
+for use in PyPSA-Earth energy system models.
 """
 
 import functools
@@ -22,50 +39,7 @@ import shapely.geometry
 from _helpers import COPERNICUS_CRS, mock_snakemake, to_csv_nafix
 
 
-# TODO: consider externalizing this download in a retrieve_* rule or helper function
-def download_potash_data():
-    # URL of the Potash GIS data
-    url = "https://pubs.usgs.gov/sir/2010/5090/s/PotashGIS.zip"
-
-    # Download directory
-    download_dir = "data/potash_gis"
-    zip_path = os.path.join(download_dir, "PotashGIS.zip")
-
-    # Ensure directory exists
-    os.makedirs(download_dir, exist_ok=True)
-
-    # Download the ZIP
-    response = requests.get(url)
-    if response.status_code == 200:
-        with open(zip_path, "wb") as f:
-            f.write(response.content)
-    else:
-        raise Exception(f"Download failed with status code {response.status_code}")
-
-    # Extract full archive to preserve directory structure
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(path=download_dir)
-
-    # Remove ZIP after extraction
-    os.remove(zip_path)
-
-    # Search for the Shapefile (.shp) within the extracted folder
-    shp_path = None
-    for root, dirs, files in os.walk(download_dir):
-        for file in files:
-            if file == "PotashTracts.shp":
-                shp_path = os.path.join(root, file)
-                break
-        if shp_path:
-            break
-
-    if not shp_path:
-        raise FileNotFoundError("PotashTracts.shp not found after extraction.")
-
-    return gpd.read_file(shp_path)
-
-
-def capsule_volume(diameter_m, height_m):
+def capsule_volume(diameter_m: float, height_m: float) -> float:
     """
     Calculate the volume of a cylindrical capsule-shaped cavern.
 
@@ -88,13 +62,12 @@ def capsule_volume(diameter_m, height_m):
     Notes
     -----
     The formula used is:
-        V = π * (d / 2)² * (h - d) + (4/3) * π * (d / 2)³
-
+    V = π (d / 2)² (h − d) + (4/3) π (d / 2)³
     where:
-        d = diameter
-        h = total height
-        (h - d) = cylindrical height
-        two hemispheres together form a full sphere of diameter d
+    - d = diameter
+    - h = total height
+    - (h − d) = cylindrical height
+    - two hemispheres together form a full sphere of diameter d
     """
     radius = diameter_m / 2
     h_cyl = height_m - diameter_m
@@ -104,10 +77,18 @@ def capsule_volume(diameter_m, height_m):
 
 
 def compute_physical_capacity(
-    diameter_m, height_m, rho_min, rho_max, theta_safety, lhv_h2
-):
+    diameter_m: float,
+    height_m: float,
+    rho_min: float,
+    rho_max: float,
+    theta_safety: float,
+    lhv_h2: float,
+) -> float:
     """
-    Computes the physical hydrogen storage energy capacity of an underground cavern in GWh.
+    Compute the physical hydrogen storage energy capacity of an underground cavern.
+
+    The function estimates the usable hydrogen energy stored in a salt cavern
+    based on cavern geometry, hydrogen density limits, and the lower heating value.
 
     Parameters
     ----------
@@ -116,11 +97,11 @@ def compute_physical_capacity(
     height_m : float
         Height of the cavern in meters.
     rho_min : float
-        Minimum hydrogen density in the cavern (e.g., at minimum pressure) in kg/m³.
+        Minimum hydrogen density in the cavern (kg/m³).
     rho_max : float
-        Maximum hydrogen density in the cavern (e.g., at maximum pressure) in kg/m³.
+        Maximum hydrogen density in the cavern (kg/m³).
     theta_safety : float
-        Usable fraction of the working gas capacity (typically < 1 to account for safety margins).
+        Usable fraction of the working gas capacity.
     lhv_h2 : float
         Lower heating value (LHV) of hydrogen in MJ/kg.
 
@@ -131,8 +112,9 @@ def compute_physical_capacity(
 
     Notes
     -----
-    This function assumes a capsule-shaped cavern geometry and uses the LHV of hydrogen to
-    compute the usable energy content of the working gas volume.
+    The cavern geometry is approximated as a capsule-shaped structure.
+    The working gas mass is calculated from the difference between maximum
+    and minimum hydrogen density multiplied by the cavern volume.
     """
     v_cavern = capsule_volume(diameter_m, height_m)
     m_working = (rho_max - rho_min) * v_cavern * theta_safety
@@ -140,28 +122,29 @@ def compute_physical_capacity(
 
 
 def compute_gwh_per_km2(
-    diameter_m,
-    height_m,
-    energy_density_MWh_per_m3=0.045,
-    surface_area_per_cavern_km2=13.0,
-):
+    diameter_m: float,
+    height_m: float,
+    energy_density_MWh_per_m3: float = 0.045,
+    surface_area_per_cavern_km2: float = 13.0,
+) -> float:
     """
     Compute the hydrogen storage potential in GWh per km² for a capsule-shaped salt cavern.
 
     Parameters
     ----------
-    diameter_m
+    diameter_m : float
         Diameter of the cavern in meters.
-    height_m
+    height_m : float
         Total height of the cavern in meters.
-    energy_density_MWh_per_m3, optional
-        Usable energy content per cubic meter of hydrogen (default is 0.045 MWh/m³).
-    surface_area_per_cavern_km2, optional
-        Surface area required per cavern in km² (default is 13 km²).
+    energy_density_MWh_per_m3 : float, optional
+        Usable hydrogen energy per cubic meter (default: 0.045 MWh/m³).
+    surface_area_per_cavern_km2 : float, optional
+        Surface area required per cavern in km² (default: 13 km²).
 
     Returns
     -------
-    Hydrogen storage potential in GWh per km² of surface area.
+    float
+        Hydrogen storage potential in GWh per km² of surface area.
     """
     volume_m3 = capsule_volume(diameter_m, height_m)
     energy_per_cavern_MWh = volume_m3 * energy_density_MWh_per_m3
@@ -169,25 +152,27 @@ def compute_gwh_per_km2(
     return (energy_per_cavern_MWh * caverns_per_km2) / 1000  # Convert to GWh
 
 
-def classify_salt_type(gdf):
+def classify_salt_type(gdf: gpd.GeoDataFrame) -> pd.Series:
     """
-    Classify the type of salt deposit based on geological and deposit type information.
+    Classify the type of salt deposit based on geological and deposit information.
 
-    This function adds a new column 'salt_type' to the input GeoDataFrame, classifying
-    each entry into one of the following categories:
+    The function adds a new column `salt_type` to the GeoDataFrame with one of
+    the following categories:
+    - excluded_brine: if the `Dep_type` column contains the word "brine"
+    - dome: if the `Dep_type` or `Geology` column contains the word "halokinetic"
+    - bedded: if the `Dep_type` or `Geology` column contains the words
+      "stratabound" or "evaporite"
+    - unknown: if none of the above conditions apply
 
-    - "excluded_brine": if the 'Dep_type' column contains the word "brine"
-    - "dome": if the 'Dep_type' or 'Geology' column contains the word "halokinetic"
-    - "bedded": if the 'Dep_type' or 'Geology' column contains the word "stratabound" or "evaporite"
-    - "unknown": if none of the above conditions are met
+    Parameters
+    ----------
+    gdf : gpd.GeoDataFrame
+        GeoPandas dataframe containing at least the columns `Dep_type` and `Geology`.
 
-    Parameters:
-        gdf (GeoDataFrame): A GeoPandas GeoDataFrame containing at least the columns
-            'Dep_type' and 'Geology'.
-
-    Returns:
-        GeoDataFrame: The input GeoDataFrame with an additional column 'salt_type'
-        indicating the classified salt deposit type.
+    Returns
+    -------
+    pd.Series
+        Series containing the classified salt deposit types.
     """
 
     def classify(row):
@@ -211,42 +196,46 @@ def classify_salt_type(gdf):
     return gdf["salt_type"]
 
 
-def apply_landuse_exclusions(gdf, regions):
+def apply_landuse_exclusions(
+    gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
     """
-    Applies land use exclusion zones to a GeoDataFrame of underground salt storage areas
-    by removing regions intersecting with specified Copernicus land use types.
+    Apply land-use exclusion zones to underground salt storage areas.
 
-    The function performs the following steps:
-    1. Applies a negative buffer to each salt storage geometry, with buffer size depending
-       on whether the salt type is 'bedded' or 'dome'.
-    2. Loads Copernicus land cover data and extracts raster cells matching specified grid codes.
-    3. Converts matching raster regions into vector geometries and applies optional buffers.
-    4. Merges all exclusion geometries and removes intersecting salt storage areas.
+    Regions intersecting with specified Copernicus land cover classes
+    are removed from the candidate storage areas.
+
+    Workflow:
+    1. Apply a negative buffer to each salt storage geometry depending on salt type.
+    2. Load Copernicus land cover raster data.
+    3. Extract raster cells corresponding to exclusion land-use codes.
+    4. Convert raster cells to vector geometries.
+    5. Merge exclusion geometries and subtract them from the salt areas.
 
     Parameters
     ----------
-    gdf : geopandas.GeoDataFrame
-        GeoDataFrame containing underground salt storage areas with a column 'salt_type'
-        and geometries in any CRS.
-    area_crs : str or pyproj.CRS
-        Target coordinate reference system (CRS) in which geometries will be processed and returned.
+    gdf : gpd.GeoDataFrame
+        Salt storage candidate areas containing a `salt_type` column.
+    regions : gpd.GeoDataFrame
+        Regions used to clip the Copernicus raster.
 
     Returns
     -------
-    geopandas.GeoDataFrame
-        A filtered GeoDataFrame in the specified CRS, excluding areas that intersect with
-        Copernicus land use exclusions.
+    gpd.GeoDataFrame
+        Filtered GeoDataFrame excluding areas intersecting with Copernicus
+        land-use exclusion zones.
 
     Notes
     -----
-    - Buffers for 'bedded' and 'dome' salt types, as well as Copernicus grid codes and
-      optional per-code buffer distances, are loaded from `snakemake.params.underground_storage`.
-    - This function assumes that `paths.copernicus` and `distance_crs` are defined elsewhere
-      in the Snakemake workflow context.
+    Buffer distances and exclusion grid codes are defined in
+    `snakemake.params.underground_storage`.
     """
     cop = snakemake.params.underground_storage["copernicus"]
     salt_buffer_m_bedded = snakemake.params.underground_storage["salt_buffer_m_bedded"]
     salt_buffer_m_dome = snakemake.params.underground_storage["salt_buffer_m_dome"]
+
+    buffer_map = cop.get("distance_buffer_by_code", {}) or {}
+    valid_codes = set(cop["grid_codes"])
 
     gdf = gdf.to_crs(distance_crs).copy()
 
@@ -259,8 +248,6 @@ def apply_landuse_exclusions(gdf, regions):
     )
     gdf = gdf[gdf.is_valid & ~gdf.is_empty]
 
-    exclusion_shapes = []
-
     # Loading Copernicus raster
     with rioxarray.open_rasterio(paths.copernicus, masked=True) as rds:
         rds_clip = rds.squeeze().rio.clip_box(*regions.total_bounds)
@@ -268,66 +255,74 @@ def apply_landuse_exclusions(gdf, regions):
         clc = rds_reproj.load()
         transform = clc.rio.transform()
 
-        for code in cop["grid_codes"]:
-            # Build mask
-            mask = clc.data == code
-            if not np.any(mask):
+        # Combined mask for all relevant grid codes
+        mask = np.isin(clc.data, list(valid_codes))
+
+        if not np.any(mask):
+            return gdf.to_crs(geo_crs)
+
+        # Single vectorization step, preserving raster values
+        shapes_gen = rasterio.features.shapes(clc.data, mask=mask, transform=transform)
+
+        exclusion_geoms = []
+
+        for geom, value in shapes_gen:
+            if value not in valid_codes:
                 continue
 
-            shapes_gen = rasterio.features.shapes(
-                mask.astype(np.uint8), mask=mask, transform=transform
-            )
+            g = shapely.geometry.shape(geom)
 
-            # Extract geometries where value == 1
-            code_shapes = [
-                shapely.geometry.shape(s) for s, val in shapes_gen if val == 1
-            ]
-
-            if not code_shapes:
-                continue
-
-            gdf_mask = gpd.GeoDataFrame(geometry=code_shapes, crs=distance_crs)
-
-            # Apply buffer if specified
-            buffer_dist = (cop.get("distance_buffer_by_code") or {}).get(str(code), 0)
+            # Apply code-specific buffer
+            buffer_dist = buffer_map.get(str(value), 0)
             if buffer_dist > 0:
-                gdf_mask["geometry"] = gdf_mask.buffer(buffer_dist)
-                gdf_mask = gdf_mask[gdf_mask.is_valid & ~gdf_mask.is_empty]
+                g = g.buffer(buffer_dist)
 
-            exclusion_shapes.append(gdf_mask)
+            if g.is_valid and not g.is_empty:
+                exclusion_geoms.append(g)
 
-    if not exclusion_shapes:
-        # No Copernicus exclusion zones found. Returning original GeoDataFrame.
+    if not exclusion_geoms:
         return gdf.to_crs(geo_crs)
 
-    # Merging all exclusion zones
-    all_exclusions = pd.concat(exclusion_shapes, ignore_index=True)
-    union_geom = all_exclusions.geometry.unary_union
-    exclusion_union = gpd.GeoDataFrame(geometry=[union_geom], crs=distance_crs)
+    # Merge all exclusion geometries
+    union_geom = shapely.ops.unary_union(exclusion_geoms)
 
-    # Removing excluded regions
-    gdf["geometry"] = gdf.geometry.difference(exclusion_union.geometry.iloc[0])
+    # Subtract exclusions from salt geometries
+    gdf["geometry"] = gdf.geometry.difference(union_geom)
     gdf = gdf[gdf.is_valid & ~gdf.is_empty]
 
     return gdf.to_crs(geo_crs)
 
 
-def estimate_h2_potential_from_potash(potash_gdf, regions, min_area_km2=13.0):
+def estimate_h2_potential_from_potash(
+    potash_gdf: gpd.GeoDataFrame, regions: gpd.GeoDataFrame, min_area_km2: float = 13.0
+) -> gpd.GeoDataFrame:
     """
-    Estimate technical underground hydrogen storage potential from potash tracts,
-    based on geological characteristics and cavern design assumptions.
+    Estimate technical hydrogen storage potential from potash deposits.
+
+    The function filters and processes potash tract data to determine
+    potential salt cavern hydrogen storage capacity.
+
+    Processing Steps:
+    - Classify salt deposit types.
+    - Filter valid salt formations (bedded or dome).
+    - Apply land-use exclusions.
+    - Remove small remaining structures.
+    - Estimate storage potential using either a surface-based or physics-based method.
 
     Parameters
     ----------
-    potash_gdf : GeoDataFrame
-        Raw potash GIS data.
+    potash_gdf : gpd.GeoDataFrame
+        Raw potash GIS dataset.
+    regions : gpd.GeoDataFrame
+        Bus regions used for spatial aggregation.
     min_area_km2 : float
-        Minimum area for a salt structure to be considered.
+        Minimum salt structure area required to be considered.
 
     Returns
     -------
-    GeoDataFrame
-        Filtered and annotated GeoDataFrame with salt cavern potential (GWh).
+    gpd.GeoDataFrame
+        Filtered and annotated GeoDataFrame including estimated hydrogen
+        storage capacity (`capacity_gwh`).
     """
     gdf = potash_gdf.copy()
     gdf["salt_type"] = classify_salt_type(gdf)
@@ -420,17 +415,38 @@ def estimate_h2_potential_from_potash(potash_gdf, regions, min_area_km2=13.0):
     return filtered
 
 
-def concat_gdf(gdf_list):
+def concat_gdf(gdf_list: list) -> gpd.GeoDataFrame:
     """
-    Concatenate multiple geopandas dataframes with common coordinate reference
-    system (crs).
+    Concatenate multiple GeoDataFrames with a shared CRS.
+
+    Parameters
+    ----------
+    gdf_list : list
+        List of GeoDataFrames.
+
+    Returns
+    -------
+    gpd.GeoDataFrame
+        Combined GeoDataFrame with the global `geo_crs`.
     """
     return gpd.GeoDataFrame(pd.concat(gdf_list), crs=geo_crs)
 
 
-def load_bus_regions(onshore_path, offshore_path):
+def load_bus_regions(onshore_path: str, offshore_path: str) -> gpd.GeoDataFrame:
     """
-    Load on- and offshore regions and concat with region_type.
+    Load and merge onshore and offshore PyPSA bus regions.
+
+    Parameters
+    ----------
+    onshore_path : str
+        Path to the onshore regions shapefile.
+    offshore_path : str
+        Path to the offshore regions shapefile.
+
+    Returns
+    -------
+    gpd.GeoDataFrame
+        Combined GeoDataFrame containing both region types.
     """
     bus_regions_offshore = gpd.read_file(offshore_path)
     bus_regions_offshore["region_type"] = "offshore"
@@ -443,14 +459,46 @@ def load_bus_regions(onshore_path, offshore_path):
     return bus_regions
 
 
-def area(gdf):
+def area(gdf: gpd.GeoDataFrame) -> pd.Series:
     """
-    Returns area of GeoDataFrame geometries in square kilometers.
+    Compute the area of geometries in a GeoDataFrame.
+
+    Parameters
+    ----------
+    gdf : gpd.GeoDataFrame
+        Input GeoDataFrame.
+
+    Returns
+    -------
+    pd.Series
+        Area values in square kilometers.
     """
     return gdf.to_crs(area_crs).area / 1e6  # in km²
 
 
-def salt_cavern_potential_by_region(cavern, regions):
+def salt_cavern_potential_by_region(
+    cavern: gpd.GeoDataFrame, regions: gpd.GeoDataFrame
+) -> pd.DataFrame:
+    """
+    Aggregate salt cavern hydrogen storage potentials by region.
+
+    The function overlays cavern storage areas with PyPSA bus regions
+    and distributes the storage potential proportionally based on the
+    spatial overlap.
+
+    Parameters
+    ----------
+    cavern : gpd.GeoDataFrame
+        Salt cavern storage areas including capacity estimates.
+    regions : gpd.GeoDataFrame
+        PyPSA bus regions.
+
+    Returns
+    -------
+    pd.DataFrame
+        Regional hydrogen storage potential aggregated by onshore and
+        offshore regions.
+    """
     # calculate area of caverns shapes
     cavern["area_caverns"] = area(cavern)
 
@@ -481,7 +529,7 @@ if __name__ == "__main__":
     paths = snakemake.input
 
     # Load potash deposits shapefile
-    gdf = download_potash_data()
+    gdf = gpd.read_file(snakemake.input.potash_shp)
 
     min_area_km2 = snakemake.params.underground_storage["min_area_km2"]
 

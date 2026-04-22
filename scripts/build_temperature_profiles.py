@@ -20,8 +20,8 @@ if __name__ == "__main__":
         snakemake = mock_snakemake(
             "build_temperature_profiles",
             simpl="",
-            clusters="1",
-            planning_horizons="2050",
+            clusters="4",
+            planning_horizons="2030",
         )
 
     time = pd.date_range(freq="h", **snakemake.params.snapshots)
@@ -31,10 +31,7 @@ if __name__ == "__main__":
 
     cutout = atlite.Cutout(cutout_path).sel(time=time)
 
-    regions_gdf = (
-        gpd.read_file(snakemake.input.regions_onshore)
-        .set_index("name")
-    )
+    regions_gdf = gpd.read_file(snakemake.input.regions_onshore).set_index("name")
 
     clustered_regions = regions_gdf.geometry.buffer(0)
 
