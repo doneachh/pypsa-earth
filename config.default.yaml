@@ -877,6 +877,58 @@ solving:
 
   mem: 30000 #memory in MB; 20 GB enough for 50+B+I+H2; 100 GB for 181+B+I+H2
 
+# ------------------- Offgrid -------------------
+
+offgrid:
+
+  # ── Feature an/aus ─────────────────────────────────────────────────
+  enable: true   # true = Offgrid-Regel aktiv | false = wird ignoriert
+
+  # ── Geo-Logik Kriterien (Layer 1) ──────────────────────────────────
+  # true  = Kriterium wird geprueft
+  # false = Kriterium wird ignoriert (gilt als erfuellt)
+
+  use_c1_distance:    true   # C1: Netzabstand zu gross → Offgrid
+  use_c2_elec_rate:   true   # C2: Elektrifizierungsrate zu niedrig → Offgrid
+  use_c3_pop_density: true   # C3: Bevoelkerungsdichte ausreichend → Offgrid
+  use_c4_low_load:    false  # C4: Baseline-Last zu klein → Offgrid
+  use_c5_congestion:  false  # C5: Leitungsueberlastung → Offgrid (Szenario C)
+                             #     false = Szenario A (Baseline)
+                             #     true  = Szenario C (Offgrid-Push)
+
+  # ── Schwellenwerte Geo-Logik ────────────────────────────────────────
+  max_distance_km:   50     # C1: Mindestabstand zum Netz [km]
+                             #     Quelle: KOSAP-Planungsdaten
+  max_elec_rate:     0.50   # C2: Max. Elektrifizierungsrate [0-1]
+  min_pop_density:   10     # C3: Mindest-Bevoelkerungsdichte [Pers/km2]
+                             #     Quelle: OnSSET-Methodik (KTH)
+  c4_max_load_mw:    20.0   # C4: Max. Baseline-Last [MW]
+  c5_line_loading:   0.50   # C5: Leitungsauslastung [0-1]
+                             #     Quelle: ENTSO-E N-1 Sicherheitsmargin
+
+  # ── Nachfrage ───────────────────────────────────────────────────────
+  kwh_per_person_yr: 60     # [kWh/yr/Person]
+                             # Quelle: Osiolo et al. (2019), laendliches Kenia
+
+  # ── Technologie CAPEX ───────────────────────────────────────────────
+  # Overnight-Kosten – werden im Skript annualisiert (→ EUR/MW/a fuer PyPSA)
+  # Quelle: PyPSA technology-data (TU Berlin / DEA)
+  solar_capex:       800    # [EUR/kW]
+  battery_capex_kwh: 250    # [EUR/kWh]
+  battery_max_hours: 6      # [h]
+  diesel_capex:      400    # [EUR/kW]
+  diesel_marginal:   300    # [EUR/MWh]
+  diesel_co2:        0.27   # [t CO2/MWh_el]
+                             # Quelle: IPCC Guidelines 2006
+  shedding_cost:     5000   # [EUR/MWh]
+
+  # ── Annuität ────────────────────────────────────────────────────────
+  # Quelle: ESMAP Mini Grid Design Manual (2019)
+  discount_rate:     0.071   # 7,1%
+  asset_lifetime:    20     # Jahre
+
+  # ── Solver ──────────────────────────────────────────────────────────
+  solver: gurobi
 
 plotting:
   map:
