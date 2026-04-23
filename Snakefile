@@ -965,6 +965,41 @@ if config["monte_carlo"]["options"].get("add_to_snakefile", False) == False:
             "copy-minimal" if os.name == "nt" else "shallow"
         script:
             "scripts/solve_network.py"
+            
+
+if config.get("offgrid", {}).get("enable", False):
+
+    rule build_offgrid:
+        input:
+            network="results/" + RDIR + "networks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
+            shapes="resources/" + RDIR + "shapes/gadm_shapes.geojson",
+            cutout="cutouts/" + CDIR + config["atlite"]["default"] + ".nc",
+            elec_data=[
+                f"data/elec_rates/{country}_electricity_access.csv"
+                for country in config["countries"]
+                if os.path.exists(f"data/elec_rates/{country}_electricity_access.csv")
+            ],
+        output:
+            network="results/" + RDIR + "networks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_offgrid.nc",
+            csv="results/" + RDIR + "offgrid_results_s{simpl}_{clusters}_l{ll}_{opts}.csv",
+        log:
+            "logs/" + RDIR + "build_offgrid/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.log",
+        benchmark:
+            "benchmarks/" + RDIR + "build_offgrid/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}",
+        threads: 4
+        resources:
+            mem_mb=16000,
+        script:
+            "scripts/build_offgrid.py"
+
+
+    rule solve_all_offgrid:
+        input:
+            expand(
+                "results/" + RDIR + "networks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_offgrid.nc",
+                **config["scenario"],
+            ),
+
 
 
 if config["monte_carlo"]["options"].get("add_to_snakefile", False) == True:
