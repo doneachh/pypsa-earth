@@ -6,7 +6,7 @@ import pandas as pd
 import pypsa
 
 logger = logging.getLogger(__name__)
-from _helpers import configure_logging
+from _helpers import configure_logging, sanitize_carriers
 
 
 def load_h2_import_nodes(path):
@@ -150,13 +150,17 @@ def add_port_h2_imports(n, import_nodes):
 
     marginal_cost = snakemake.params.imports_config["price"]["H2_ship"]
 
-    names = df["bus"].astype(str) + " import H2 port"
+    base_names = df["bus"].astype(str)
+    df = df.set_index(base_names)
+    #names = df["bus"].astype(str) + " import H2 port"
 
     n.madd(
         "Generator",
-        names,
+        df.index,
+        suffix=" import H2 port",
+        #names,
         bus=df["h2_bus"],
-        carrier="import H2 port",
+        carrier="H2",
         p_nom_extendable=True,
         p_nom_max=df["p_nom_max_port"],
         marginal_cost=marginal_cost,
@@ -179,11 +183,13 @@ if __name__ == "__main__":
 
     import_nodes = load_h2_import_nodes(snakemake.input.h2_import_nodes)
 
-    import_nodes = get_h2_target_buses(n,import_nodes,)
+    import_nodes = get_h2_target_buses(n,import_nodes)
 
-    add_pipeline_h2_imports(n,import_nodes,)
+    add_pipeline_h2_imports(n,import_nodes)
 
-    add_port_h2_imports(n,import_nodes,)
+    add_port_h2_imports(n,import_nodes)
+
+    sanitize_carriers(n, snakemake.config)
 
     n.export_to_netcdf(snakemake.output[0])
     

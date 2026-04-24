@@ -28,6 +28,7 @@ from _helpers import (
     sanitize_locations,
     three_2_two_digits_country,
     two_2_three_digits_country,
+    annuity,
 )
 from prepare_network import add_co2limit
 from prepare_transport_data import prepare_transport_data
@@ -494,6 +495,21 @@ def add_hydrogen(n, costs):
         * costs.at["fuel cell", "efficiency"],
         lifetime=costs.at["fuel cell", "lifetime"],
     )
+    
+    if snakemake.params.sector_options["hydrogen"].get("h2_turbine", False):
+        n.madd(
+                "Link",
+                spatial.nodes + " H2 turbine",
+                bus0=spatial.nodes + " H2",
+                bus1=spatial.nodes,
+                p_nom_extendable=True,
+                carrier="H2 turbine",
+                efficiency=costs.at["OCGT", "efficiency"],
+                capital_cost=costs.at["OCGT", "fixed"]
+                * costs.at["OCGT", "efficiency"],  # NB: fixed cost is per MWel
+                marginal_cost=costs.at["OCGT", "VOM"],
+                lifetime=costs.at["OCGT", "lifetime"],
+            )
 
     cavern_nodes = pd.DataFrame()
 
@@ -3174,6 +3190,249 @@ def remove_carrier_related_components(n, carriers_to_drop):
     n.mremove("Link", links_to_remove)
 
 
+def add_enhanced_geothermal(
+    n,
+    costs,
+    egs_potentials,
+    egs_config,
+    costs_config,
+    egs_capacity_factors=None,
+):
+    """
+    Add Enhanced Geothermal Systems (EGS) to pypsa-earth using region-aggregated input.
+
+    Parameters
+    ----------
+    n : pypsa.Network
+        Network to modify in-place.
+    costs : pd.DataFrame
+        Technology cost assumptions.
+    egs_potentials : str or pathlib.Path
+        Path to CSV containing one EGS row per AC bus / region.
+        Required columns:
+            - p_nom_max  [GW_el]
+            - CAPEX      [EUR/GW_el]
+            - HeatSust   [TWh_th]  (currently not used directly in the network logic)
+    egs_config : dict
+        sector.enhanced_geothermal config block.
+        Expected keys include:
+            - enable
+            - var_cf
+            - flexible
+            - max_hours
+            - max_boost
+    costs_config : dict
+        Global costs config, used for discount rate.
+    egs_capacity_factors : str or pathlib.Path, optional
+        Path to CSV with time-varying regional EGS capacity factors.
+        Only required if egs_config['var_cf'] is True.
+    """
+    logger.info("Adding Enhanced Geothermal Systems (EGS).")
+
+    egs_potentials = pd.read_csv(egs_potentials, index_col=0)
+
+    required_cols = {"p_nom_max", "CAPEX"}
+    missing_cols = required_cols - set(egs_potentials.columns)
+    if missing_cols:
+        raise ValueError(
+            f"EGS potentials file is missing required columns: {sorted(missing_cols)}"
+        )
+
+    # keep only buses that are actually present in the electricity network
+    available_buses = egs_potentials.index.intersection(n.buses.index)
+    if available_buses.empty:
+        logger.warning(
+            "EGS potentials file does not contain any buses that exist in the network. Skipping EGS."
+        )
+        return
+
+    egs_potentials = egs_potentials.loc[available_buses].copy()
+    egs_potentials = egs_potentials.loc[egs_potentials["p_nom_max"] > 0].copy()
+
+    if egs_potentials.empty:
+        logger.warning("No positive EGS potential left after filtering to network buses.")
+        return
+
+    # cost assumptions
+    Nyears = n.snapshot_weightings.generators.sum() / 8760.0
+    dr = costs_config["fill_values"]["discount rate"]
+
+    geothermal_lt = costs.at["geothermal", "lifetime"]
+    geothermal_fom = costs.at["geothermal", "FOM"]
+    geothermal_annuity = annuity(geothermal_lt, dr)
+
+    orc_capex = costs.at["organic rankine cycle", "investment"]
+    orc_lt = costs.at["organic rankine cycle", "lifetime"]
+    orc_annuity = annuity(orc_lt, dr)
+    orc_capital_cost = (orc_annuity + geothermal_fom / (1.0 + geothermal_fom)) * orc_capex * Nyears
+
+    efficiency_orc = costs.at["organic rankine cycle", "electricity-input"]
+    efficiency_dh = costs.at["geothermal", "district heat-input"]
+    
+
+    # CAPEX from your build_egs_potentials script is EUR/GW_el -> convert to EUR/MW_el
+    # and subtract ORC cost because ORC is represented as a separate link,
+    # exactly following the PyPSA-Eur logic.
+    egs_potentials["capital_cost"] = (
+        (geothermal_annuity + geothermal_fom / (1.0 + geothermal_fom))
+        * (egs_potentials["CAPEX"] * 1e-3 - orc_capex)
+        * Nyears
+    )
+    
+
+    if (egs_potentials["capital_cost"] <= 0).any():
+        bad = egs_potentials.index[egs_potentials["capital_cost"] <= 0].tolist()
+        raise ValueError(
+            f"Negative or zero EGS capital costs found after ORC subtraction for buses: {bad}"
+        )
+
+    # p_nom_max from build_egs_potentials is GW_el -> convert to MW_el
+    egs_potentials["p_nom_max"] = egs_potentials["p_nom_max"] * 1000.0
+
+    # carriers
+    for carrier in [
+        "geothermal heat",
+        "geothermal organic rankine cycle",
+        "geothermal district heat",
+    ]:
+        if carrier not in n.carriers.index:
+            n.add("Carrier", carrier)
+
+    # single source bus like in PyPSA-Eur
+    geothermal_source_bus = "Earth enhanced geothermal systems"
+    if geothermal_source_bus not in n.buses.index:
+        n.add(
+            "Bus",
+            geothermal_source_bus,
+            carrier="geothermal heat",
+            unit="MWh_th",
+            location="Earth",
+        )
+
+    geothermal_source_gen = "Earth enhanced geothermal systems"
+    if geothermal_source_gen not in n.generators.index:
+        n.add(
+            "Generator",
+            geothermal_source_gen,
+            bus=geothermal_source_bus,
+            carrier="geothermal heat",
+            p_nom_extendable=True,
+        )
+
+    if egs_config.get("var_cf", True):
+        if egs_capacity_factors is None:
+            raise ValueError(
+                "EGS capacity factors file is required when sector.enhanced_geothermal.var_cf is true."
+            )
+        efficiency = pd.read_csv(egs_capacity_factors, parse_dates=True, index_col=0)
+        efficiency.index = pd.DatetimeIndex(efficiency.index)
+        efficiency = efficiency.reindex(n.snapshots)
+
+        missing_cf = egs_potentials.index.difference(efficiency.columns)
+        if len(missing_cf):
+            logger.warning(
+                f"Missing EGS capacity-factor profiles for {len(missing_cf)} buses. Filling with 1.0."
+            )
+            for bus in missing_cf:
+                efficiency[bus] = 1.0
+
+        efficiency = efficiency[egs_potentials.index]
+        logger.info("Adding EGS with time-varying capacity factors.")
+    else:
+        efficiency = 1.0
+        logger.info("Adding EGS with static capacity factor 1.0.")
+
+    as_chp = "urban central heat" in n.loads.carrier.unique()
+    if as_chp:
+        logger.info("Adding EGS as combined electricity / district-heat option where urban central heat buses exist.")
+    else:
+        logger.info("Adding EGS as electricity-only option.")
+
+    for bus, row in egs_potentials.iterrows():
+        surface_bus = f"{bus} geothermal heat surface"
+        well_link = f"{bus} enhanced geothermal"
+        orc_link = f"{bus} geothermal organic rankine cycle"
+        dh_link = f"{bus} geothermal district heat"
+        reservoir = f"{bus} geothermal reservoir"
+
+        if surface_bus not in n.buses.index:
+            n.add(
+                "Bus",
+                surface_bus,
+                location=bus,
+                unit="MWh_th",
+                carrier="geothermal heat",
+                x=n.buses.at[bus, "x"] if "x" in n.buses.columns else np.nan,
+                y=n.buses.at[bus, "y"] if "y" in n.buses.columns else np.nan,
+            )
+
+        p_nom_max_th = row["p_nom_max"] / efficiency_orc
+        capital_cost_th = row["capital_cost"] * efficiency_orc
+
+        if egs_config.get("var_cf", True):
+            bus_eta = efficiency[bus].reindex(n.snapshots).astype(float)
+        else:
+            bus_eta = 1.0
+
+        n.add(
+            "Link",
+            well_link,
+            bus0=geothermal_source_bus,
+            bus1=surface_bus,
+            carrier="geothermal heat",
+            p_nom_extendable=True,
+            p_nom_max=p_nom_max_th,
+            capital_cost=capital_cost_th,
+            efficiency=bus_eta,
+            lifetime=geothermal_lt,
+        )
+
+        n.add(
+            "Link",
+            orc_link,
+            bus0=surface_bus,
+            bus1=bus,
+            p_nom_extendable=True,
+            carrier="geothermal organic rankine cycle",
+            capital_cost=orc_capital_cost * efficiency_orc,
+            efficiency=efficiency_orc,
+            lifetime=orc_lt,
+        )
+
+        heat_bus = f"{bus} urban central heat"
+        if as_chp and heat_bus in n.buses.index:
+            n.add(
+                "Link",
+                dh_link,
+                bus0=surface_bus,
+                bus1=heat_bus,
+                carrier="geothermal district heat",
+                capital_cost=(
+                    orc_capital_cost
+                    * efficiency_orc
+                    * costs.at["geothermal", "district heat surcharge"]
+                    / 100.0
+                ),
+                efficiency=efficiency_dh,
+                p_nom_extendable=True,
+                lifetime=geothermal_lt,
+            )
+
+        if egs_config.get("flexible", True):
+            max_hours = egs_config.get("max_hours", 240)
+            boost = egs_config.get("max_boost", 0.25)
+
+            n.add(
+                "StorageUnit",
+                reservoir,
+                bus=surface_bus,
+                carrier="geothermal heat",
+                p_nom_extendable=True,
+                p_min_pu=-boost,
+                max_hours=max_hours,
+                cyclic_state_of_charge=True,
+            )
+
 if __name__ == "__main__":
     if "snakemake" not in globals():
         # from helper import mock_snakemake #TODO remove func from here to helper script
@@ -3380,6 +3639,21 @@ if __name__ == "__main__":
             n = average_every_nhours(n, m.group(0))
             break
 
+
+    if snakemake.params.sector_options.get("enhanced_geothermal", {}).get("enable", False):
+        add_enhanced_geothermal(
+           n=n,
+           costs=costs,
+           costs_config=snakemake.config["costs"],
+           egs_potentials=snakemake.input.egs_potentials,
+           egs_config=snakemake.params.sector_options["enhanced_geothermal"],
+           egs_capacity_factors=(
+                snakemake.input.egs_capacity_factors
+                if hasattr(snakemake.input, "egs_capacity_factors")
+                else None
+           ),
+        )
+  
     co2_budget = snakemake.params.co2_budget
     if co2_budget["enable"]:
         add_co2_budget(

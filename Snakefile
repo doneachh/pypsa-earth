@@ -788,7 +788,11 @@ rule add_extra_components:
     input:
         network="networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
         tech_costs=COSTS,
-        geothermal_potential="resources/" + RDIR + "geothermal_potentials_elec_s{simpl}_{clusters}.csv"
+        #geothermal_potential=(
+        #    "resources/" + RDIR + "geothermal_potentials_elec_s{simpl}_{clusters}.csv"
+        #    if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]
+        #    else []
+        #)
     output:
         "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec.nc",
     log:
@@ -1039,7 +1043,7 @@ rule solve_sector_networks:
     input:
         expand(
             RESDIR
-            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
             **config["scenario"],
             **config["costs"],
             **config["export"],
@@ -1203,6 +1207,8 @@ rule prepare_sector_network:
         shapes_path="resources/"
         + RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
+        egs_potentials="resources/" + RDIR + "egs_potentials{simpl}_{clusters}_{planning_horizons}.csv",
+        egs_capacity_factors="resources/" + RDIR + "egs_capacity_factors{simpl}_{clusters}_{planning_horizons}.csv",
         pipelines=branch(
             config["sector"]["hydrogen"]["network"],
             branch(
@@ -1291,13 +1297,13 @@ rule add_export:
         costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
         ship_profile="resources/" + SECDIR + "ship_profile_{h2export}TWh.csv",
         network=RESDIR
-        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}.nc",
+        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_import.nc",
         shapes_path="resources/"
         + RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
     output:
         RESDIR
-        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
     script:
         "scripts/add_export.py"
 
@@ -1753,13 +1759,13 @@ if config["foresight"] == "overnight":
             # network=RESDIR
             # + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}.nc",
             network=RESDIR
-            + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+            + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
             costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
             configs=SDIR + "configs/config.yaml",  # included to trigger copy_config rule
             agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
         output:
             RESDIR
-            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
         shadow:
             "copy-minimal" if os.name == "nt" else "shallow"
         log:
@@ -2265,16 +2271,36 @@ if config["foresight"] == "myopic":
                 **config["export"],
             ),
 
-if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]:
-    rule build_geothermal_potentials:
-        input:
-            geothermal="data/geothermal_potential.csv",
-            regions="resources/" + RDIR + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson"
+#if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]:
+#    rule build_geothermal_potentials:
+#        input:
+#            geothermal="data/geothermal_potential.csv",
+#            regions="resources/" + RDIR + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson"
+#
+#        output:
+#            "resources/" + RDIR + "geothermal_potentials_elec_s{simpl}_{clusters}.csv"
+#        script:
+#            "scripts/build_geothermal_potentials.py"
 
+
+if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]:
+    rule build_egs_potentials:
+        params:
+            countries=config["countries"],
+            sector=config["sector"],
+            snapshots=config["snapshots"],
+        input:
+            egs_input="/mnt/c/Users/nikla/Documents/Git/pypsa-earth-geothermal/data/egs_input_data.csv",
+            regions="resources/" + RDIR + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
+            temp_air_total="resources/" + SECDIR + "temperatures/temp_air_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
         output:
-            "resources/" + RDIR + "geothermal_potentials_elec_s{simpl}_{clusters}.csv"
+            egs_potentials="resources/" + RDIR + "egs_potentials{simpl}_{clusters}_{planning_horizons}.csv",
+            egs_capacity_factors="resources/" + RDIR + "egs_capacity_factors{simpl}_{clusters}_{planning_horizons}.csv",
+        threads: 1
+        resources:
+            mem_mb=2000
         script:
-            "scripts/build_geothermal_potentials.py"
+            "scripts/build_egs_potentials.py"
 
 
 rule run_scenario:
