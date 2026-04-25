@@ -499,8 +499,6 @@ def add_hydrogen(n: pypsa.Network, costs: pd.DataFrame) -> None:
                 # convert TWh to MWh
                 h2_caverns = h2_caverns * 1e6
 
-                # clip at 1000 TWh for one location
-                h2_caverns.clip(upper=1e9, inplace=True)
 
                 logger.info("Add hydrogen underground storage")
 
