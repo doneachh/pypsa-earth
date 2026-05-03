@@ -27,7 +27,6 @@ from _helpers import (
     sanitize_locations,
     three_2_two_digits_country,
     two_2_three_digits_country,
-    annuity,
 )
 from prepare_network import add_co2limit
 from prepare_transport_data import prepare_transport_data
@@ -3229,6 +3228,20 @@ def remove_carrier_related_components(n: pypsa.Network, carriers_to_drop: list) 
     )
     n.mremove("Link", links_to_remove)
 
+def annuity(n, r):
+    """
+    Calculate the annuity factor for an asset with lifetime n years and.
+    discount rate of r, e.g. annuity(20, 0.05) * 20 = 1.6
+    """
+
+    if isinstance(r, pd.Series):
+        return pd.Series(1 / n, index=r.index).where(
+            r == 0, r / (1.0 - 1.0 / (1.0 + r) ** n)
+        )
+    elif r > 0:
+        return r / (1.0 - 1.0 / (1.0 + r) ** n)
+    else:
+        return 1 / n
 
 def add_enhanced_geothermal(
     n,
@@ -3298,6 +3311,7 @@ def add_enhanced_geothermal(
 
     geothermal_lt = costs.at["geothermal", "lifetime"]
     geothermal_fom = costs.at["geothermal", "FOM"]
+    geothermal_fom = geothermal_fom / 100
     geothermal_annuity = annuity(geothermal_lt, dr)
 
     orc_capex = costs.at["organic rankine cycle", "investment"]

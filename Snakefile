@@ -868,7 +868,6 @@ rule add_extra_components:
     params:
         transmission_efficiency=config["sector"]["transmission_efficiency"],
     input:
-        overrides="data/override_component_attrs",
         network="networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
         tech_costs="resources/" + RDIR + f"costs_{config['costs']['year']}_elec.csv",
     output:
@@ -2373,24 +2372,24 @@ rule retrieve_egs_data:
         #unpack_archive(str(input.egs_zip),output["egs_dir"]) 
         #shell("mv data/egs_data/allPlacements_POL-lowV2_Doublette_xED8.csv {output.egs_file}")
 
-if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]:
-    rule build_egs_potentials:
-        params:
-            countries=config["countries"],
-            sector=config["sector"],
-            snapshots=config["snapshots"],
-        input:
-            egs_input="data/egs_data/egs_input_dataset.csv",
-            regions="resources/" + RDIR + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
-            temp_air_total="resources/" + SECDIR + "temperatures/temp_air_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
-        output:
-            egs_potentials="resources/" + RDIR + "egs_potentials{simpl}_{clusters}_{planning_horizons}.csv",
-            egs_capacity_factors="resources/" + RDIR + "egs_capacity_factors{simpl}_{clusters}_{planning_horizons}.csv",
-        threads: 1
-        resources:
-            mem_mb=2000
-        script:
-            "scripts/build_egs_potentials.py"
+
+rule build_egs_potentials:
+    params:
+        countries=config["countries"],
+        sector=config["sector"],
+        snapshots=config["snapshots"],
+    input:
+        egs_input="data/egs_data/egs_input_dataset.csv",
+        regions="resources/" + RDIR + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
+        temp_air_total="resources/" + SECDIR + "temperatures/temp_air_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
+    output:
+        egs_potentials="resources/" + RDIR + "egs_potentials{simpl}_{clusters}_{planning_horizons}.csv",
+        egs_capacity_factors="resources/" + RDIR + "egs_capacity_factors{simpl}_{clusters}_{planning_horizons}.csv",
+    threads: 1
+    resources:
+        mem_mb=2000
+    script:
+        "scripts/build_egs_potentials.py"
 
 
 rule run_scenario:
