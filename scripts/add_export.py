@@ -46,7 +46,7 @@ def select_ports(n):
         )
     )
     countries = [c for c in countries if c in set(ports["country"].dropna().astype(str).str.strip())] # sort out of buses without country
-
+    
     gadm_layer_id = snakemake.params.gadm_layer_id
 
     ports = locate_bus(
@@ -63,7 +63,7 @@ def select_ports(n):
     ports_sel = ports.loc[~ports[gcol].duplicated(keep="first")].set_index(gcol)
 
     # Select the hydrogen buses based on nodes with ports
-    # hydrogen_buses_ports = n.buses.loc[ports_sel.index + " H2"] #old 
+    #hydrogen_buses_ports = n.buses.loc[ports_sel.index + " H2"] #old 
 
     hydrogen_buses_ports = n.buses[
     n.buses.index.str.endswith(" H2") &

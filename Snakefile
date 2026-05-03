@@ -6,10 +6,12 @@ import sys
 import os
 import warnings
 import pathlib
+import gzip
+import shutil
 
 sys.path.append("./scripts")
 
-from shutil import copyfile, move
+from shutil import copyfile, move, unpack_archive
 
 from snakemake.remote.HTTP import RemoteProvider as HTTPRemoteProvider
 
@@ -80,6 +82,7 @@ wildcard_constraints:
     discountrate=r"[-+a-zA-Z0-9\.\s]*",
     demand=r"[-+a-zA-Z0-9\.\s]*",
     h2export=r"[0-9]+(\.[0-9]+)?",
+    h2import=r"[0-9]+(\.[0-9]+)?",
     planning_horizons="20[2-9][0-9]|2100",
 
 
@@ -786,13 +789,9 @@ rule add_extra_components:
     params:
         transmission_efficiency=config["sector"]["transmission_efficiency"],
     input:
+        overrides="data/override_component_attrs",
         network="networks/" + RDIR + "elec_s{simpl}_{clusters}.nc",
         tech_costs=COSTS,
-        #geothermal_potential=(
-        #    "resources/" + RDIR + "geothermal_potentials_elec_s{simpl}_{clusters}.csv"
-        #    if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]
-        #    else []
-        #)
     output:
         "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec.nc",
     log:
@@ -1043,10 +1042,11 @@ rule solve_sector_networks:
     input:
         expand(
             RESDIR
-            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
+            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
             **config["scenario"],
             **config["costs"],
             **config["export"],
+            h2import=config["import"]["limit"],
         ),
 
 
@@ -1246,7 +1246,8 @@ rule build_ship_profile:
 
 rule prepare_import:
     params:
-        imports_config=config["imports"],
+        imports_config=config["import"],
+        h2import=lambda wildcards: float(wildcards.h2import),
         alternative_clustering=config["cluster_options"]["alternative_clustering"],
         gadm_layer_id=config["build_shape_options"]["gadm_layer_id"],
     input:
@@ -1262,23 +1263,23 @@ rule prepare_import:
     output:
         h2_import_nodes="resources/"
         + SECDIR
-        + "h2_import_nodes_elec_s{simpl}_{clusters}.csv",
+        + "h2_import_nodes_elec_s{simpl}_{clusters}_{h2import}import.csv",
     script:
         "scripts/prepare_import.py"
 
-
-rule add_import:
-    params:
-        imports_config=config["imports"],
-    input:
-        network=RESDIR
-        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}.nc",
-        h2_import_nodes="resources/" + SECDIR + "h2_import_nodes_elec_s{simpl}_{clusters}.csv",
-    output:
-        RESDIR
-        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_import.nc",
-    script:
-        "scripts/add_import.py"
+if config["import"].get("enable", False):
+    rule add_import:
+        params:
+            imports_config=config["import"],
+        input:
+            network=RESDIR
+            + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}.nc",
+            h2_import_nodes="resources/" + SECDIR + "h2_import_nodes_elec_s{simpl}_{clusters}_{h2import}import.csv",
+        output:
+            RESDIR
+            + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2import}import.nc",
+        script:
+            "scripts/add_import.py"
 
 
 rule add_export:
@@ -1297,13 +1298,13 @@ rule add_export:
         costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
         ship_profile="resources/" + SECDIR + "ship_profile_{h2export}TWh.csv",
         network=RESDIR
-        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_import.nc",
+        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2import}import.nc",
         shapes_path="resources/"
         + RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
     output:
         RESDIR
-        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
+        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
     script:
         "scripts/add_export.py"
 
@@ -1759,32 +1760,32 @@ if config["foresight"] == "overnight":
             # network=RESDIR
             # + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}.nc",
             network=RESDIR
-            + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
+            + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
             costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
             configs=SDIR + "configs/config.yaml",  # included to trigger copy_config rule
             agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
         output:
             RESDIR
-            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_import.nc",
+            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
         shadow:
             "copy-minimal" if os.name == "nt" else "shallow"
         log:
             solver="logs/"
             + SECDIR
-            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_solver.log",
+            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import_solver.log",
             python="logs/"
             + SECDIR
-            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_python.log",
+            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import_python.log",
             memory="logs/"
             + SECDIR
-            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_memory.log",
+            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import_memory.log",
         threads: 25
         resources:
             mem_mb=config["solving"]["mem"],
         benchmark:
             (
                 RESDIR
-                + "benchmarks/solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export"
+                + "benchmarks/solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import"
             )
         script:
             "scripts/solve_network.py"
@@ -1799,22 +1800,30 @@ rule make_sector_summary:
         scenario_config=config["scenario"],
         costs_config=config["costs"],
         h2export_qty=config["export"]["h2export"],
+        h2import_qty=config["import"]["limit"],
         foresight=config["foresight"],
+        ll=config["scenario"]["ll"]
     input:
         networks=expand(
             RESDIR
-            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
             **config["scenario"],
             **config["costs"],
             **config["export"],
+            h2import=config["import"]["limit"],
         ),
-        costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
+        #costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
+        costs=expand(
+        "resources/" + RDIR + "costs_{planning_horizons}.csv",
+        planning_horizons=config["scenario"]["planning_horizons"],
+        ),
         plots=expand(
             RESDIR
-            + "maps/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}-costs-all_{planning_horizons}_{discountrate}_{demand}_{h2export}export.pdf",
+            + "maps/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}-costs-all_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.pdf",
             **config["scenario"],
             **config["costs"],
             **config["export"],
+            h2import=config["import"]["limit"],
         ),
     output:
         nodal_costs=SDIR + "csvs/nodal_costs.csv",
@@ -1901,17 +1910,17 @@ rule make_statistics:
 rule plot_sector_network:
     input:
         network=RESDIR
-        + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+        + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
     output:
         map=RESDIR
-        + "maps/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}-costs-all_{planning_horizons}_{discountrate}_{demand}_{h2export}export.pdf",
+        + "maps/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}-costs-all_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.pdf",
     threads: 2
     resources:
         mem_mb=10000,
     benchmark:
         (
             RESDIR
-            + "benchmarks/plot_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export"
+            + "benchmarks/plot_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import"
         )
     script:
         "scripts/plot_network.py"
@@ -1947,7 +1956,7 @@ rule prepare_db:
         tech_colors=config["plotting"]["tech_colors"],
     input:
         network=RESDIR
-        + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+        + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
     output:
         db=RESDIR
         + "summaries/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}-costs-all_{planning_horizons}_{discountrate}_{demand}_{h2export}export.csv",
@@ -2229,13 +2238,13 @@ if config["foresight"] == "myopic":
             policy_config=config["policy_config"],
         input:
             network=RESDIR
-            + "prenetworks-brownfield/elec_s{simpl}_{clusters}_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+            + "prenetworks-brownfield/elec_s{simpl}_{clusters}_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
             costs="resources/" + RDIR + "costs_{planning_horizons}.csv",
             configs=SDIR + "configs/config.yaml",  # included to trigger copy_config rule
             agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
         output:
             network=RESDIR
-            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+            + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
             # config=RESDIR
             # + "configs/config.elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.yaml",
         shadow:
@@ -2243,20 +2252,20 @@ if config["foresight"] == "myopic":
         log:
             solver="logs/"
             + SECDIR
-            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_solver.log",
+            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import_solver.log",
             python="logs/"
             + SECDIR
-            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_python.log",
+            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import_python.log",
             memory="logs/"
             + SECDIR
-            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_memory.log",
+            + "solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import_memory.log",
         threads: 25
         resources:
             mem_mb=config["solving"]["mem"],
         benchmark:
             (
                 RESDIR
-                + "benchmarks/solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export"
+                + "benchmarks/solve_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import"
             )
         script:
             "./scripts/solve_network.py"
@@ -2265,23 +2274,30 @@ if config["foresight"] == "myopic":
         input:
             networks=expand(
                 RESDIR
-                + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export.nc",
+                + "postnetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_{demand}_{h2export}export_{h2import}import.nc",
                 **config["scenario"],
                 **config["costs"],
                 **config["export"],
             ),
 
-#if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]:
-#    rule build_geothermal_potentials:
-#        input:
-#            geothermal="data/geothermal_potential.csv",
-#            regions="resources/" + RDIR + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson"
-#
-#        output:
-#            "resources/" + RDIR + "geothermal_potentials_elec_s{simpl}_{clusters}.csv"
-#        script:
-#            "scripts/build_geothermal_potentials.py"
+rule retrieve_egs_data:
+    input:
+        egs_gz=HTTP.remote(
+            "https://data.mendeley.com/public-files/datasets/sbs8k66bwf/files/657dccad-dec5-487d-b8aa-86a8d4cb323d/file_downloaded",
+            keep_local=True,
+        ),
+    output:
+        #egs_dir=directory("data/egs_data"),
+        egs_file="data/egs_data/egs_input_dataset.csv",
+    run:
+        output_file = Path(output.egs_file)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
+        with gzip.open(str(input.egs_gz), "rb") as f_in:
+            with open(output_file, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        #unpack_archive(str(input.egs_zip),output["egs_dir"]) 
+        #shell("mv data/egs_data/allPlacements_POL-lowV2_Doublette_xED8.csv {output.egs_file}")
 
 if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]:
     rule build_egs_potentials:
@@ -2290,7 +2306,7 @@ if "geothermal" in config["electricity"]["extendable_carriers"]["Generator"]:
             sector=config["sector"],
             snapshots=config["snapshots"],
         input:
-            egs_input="/mnt/c/Users/nikla/Documents/Git/pypsa-earth-geothermal/data/egs_input_data.csv",
+            egs_input="data/egs_data/egs_input_dataset.csv",
             regions="resources/" + RDIR + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
             temp_air_total="resources/" + SECDIR + "temperatures/temp_air_total_elec_s{simpl}_{clusters}_{planning_horizons}.nc",
         output:

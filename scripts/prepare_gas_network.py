@@ -88,11 +88,9 @@ def download_GGIT_gas_network():
     The dataset contains 3144 pipelines.
     """
     url = "https://github.com/pypsa-meets-earth/temporary_storage/raw/refs/heads/main/datasets/GEM-GGIT-Gas-Pipelines-December-2022.xlsx"
-    # file_path = "/home/krn37081/Git/pypsa-earth-geothermal/data/existing_infrastructure/GEM-GGIT-Gas-Pipelines-December-2022.xlsx"
     
     GGIT_gas_pipeline = pd.read_excel(
         content_retrieve(url),
-        #file_path,
         index_col=0,
         sheet_name="Gas Pipelines 2022-12-16",
         header=0,
@@ -313,6 +311,44 @@ def prepare_IGGIELGN_data(
 
 
 def load_bus_regions(onshore_path, offshore_path=None):
+    """
+    Load onshore and optional offshore bus regions.
+
+    The function reads onshore bus regions, converts them to EPSG:3857, standardizes
+    the region identifier column to ``gadm_id``, and marks them as onshore. If an
+    offshore regions file is provided, it is converted to the same CRS, standardized
+    to the same column layout, and marked as offshore. The onshore and offshore
+    regions are then combined and dissolved into model and country border
+    geometries.
+
+    Parameters
+    ----------
+    onshore_path : str or path-like
+        Path to the onshore bus regions file. The file must contain ``name``,
+        ``country`` and ``geometry`` columns.
+    offshore_path : str or path-like, optional
+        Path to the offshore bus regions file. If provided, the file must contain
+        either a ``name`` or ``gadm_id`` column and a geometry column. If no
+        ``country`` column is present, it is filled with ``None``.
+
+    Returns
+    -------
+    tuple
+        Tuple containing ``bus_regions_onshore``, ``bus_regions_offshore``,
+        ``bus_regions_all``, ``model_borders`` and ``country_borders``.
+
+        ``bus_regions_onshore`` and ``bus_regions_offshore`` contain standardized
+        bus regions with ``gadm_id``, ``country``, ``geometry`` and
+        ``is_offshore`` columns. ``bus_regions_all`` contains the combined non-empty
+        onshore and offshore regions. ``model_borders`` contains the dissolved
+        geometry of all model regions, while ``country_borders`` contains the
+        dissolved geometry of the onshore regions.
+
+    Raises
+    ------
+    KeyError
+        If offshore regions are provided without a ``name`` or ``gadm_id`` column.
+    """
     bus_regions_onshore = gpd.read_file(onshore_path).to_crs(epsg=3857)
     bus_regions_onshore = (
         bus_regions_onshore.rename(columns={"name": "gadm_id"})
@@ -352,7 +388,7 @@ def load_bus_regions(onshore_path, offshore_path=None):
         bus_regions_all.geometry.notna() & ~bus_regions_all.geometry.is_empty
     ].copy()
 
-    # WICHTIG: CRS der Borders = CRS der zugrundeliegenden Geometrien
+    # Important: CRS of borders = CRS of the underlying geometries
     model_borders = gpd.GeoDataFrame(
         geometry=[unary_union(bus_regions_all.geometry)],
         crs=bus_regions_all.crs,
@@ -367,6 +403,29 @@ def load_bus_regions(onshore_path, offshore_path=None):
 
 
 def get_states_in_order(pipeline, bus_regions_onshore):
+    """
+    Return onshore bus regions crossed by a pipeline in geometric order.
+
+    The function samples points along a ``LineString`` or each part of a
+    ``MultiLineString`` and checks which onshore bus region contains each sampled
+    point. Region identifiers are collected from the ``gadm_id`` column in the
+    order in which they are first encountered. Repeated region identifiers are
+    stored only once.
+
+    Parameters
+    ----------
+    pipeline : shapely.geometry.LineString or shapely.geometry.MultiLineString
+        Pipeline geometry used to determine the crossed onshore regions.
+    bus_regions_onshore : geopandas.GeoDataFrame
+        Onshore bus regions with ``geometry`` and ``gadm_id`` columns.
+
+    Returns
+    -------
+    list of str
+        Ordered list of unique ``gadm_id`` values for onshore regions crossed by
+        the pipeline. An empty list is returned for unsupported geometry types or
+        if no containing region is found.
+    """
     states_p = []
 
     if pipeline.geom_type == "LineString":
@@ -409,7 +468,29 @@ def get_states_in_order(pipeline, bus_regions_onshore):
 
 
 def parse_states(pipelines, bus_regions_onshore):
-    # Parse the states of the points which are connected by the pipeline geometry object
+    """
+    Parse onshore states or regions crossed by each pipeline geometry.
+
+    For each pipeline, the function determines the ordered list of onshore regions
+    intersected by the pipeline geometry, stores the sequence of passed states, the
+    number of passed states, and the connected node pairs derived from consecutive
+    entries in that sequence.
+
+    Parameters
+    ----------
+    pipelines : geopandas.GeoDataFrame
+        Pipeline geometries to process. The dataframe must contain a geometry
+        column.
+    bus_regions_onshore : geopandas.GeoDataFrame
+        Onshore bus regions used to determine the ordered regions crossed by each
+        pipeline.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Copy of the input pipeline dataframe with the additional columns ``nodes``,
+        ``states_passed`` and ``amount_states_passed``.
+    """
     pipelines["nodes"] = None
     pipelines["states_passed"] = None
     pipelines["amount_states_passed"] = None
@@ -430,6 +511,23 @@ def parse_states(pipelines, bus_regions_onshore):
 
 
 def _countries_from_row(row):
+    """
+    Extract country names associated with a GGIT pipeline record.
+
+    The function collects country names from the ``StartCountry`` and
+    ``EndCountry`` columns and additionally parses comma-separated entries from the
+    ``Countries`` column. Missing values and empty country names are ignored.
+
+    Parameters
+    ----------
+    row : pandas.Series
+        GGIT pipeline record containing country metadata.
+
+    Returns
+    -------
+    set of str
+        Unique country names associated with the pipeline record.
+    """
     countries = set()
 
     for col in ["StartCountry", "EndCountry"]:
@@ -445,6 +543,24 @@ def _countries_from_row(row):
 
 
 def _iter_lines(geom):
+    """
+    Iterate over valid line geometries contained in a geometry object.
+
+    The function yields a single ``LineString`` directly, or merges and yields the
+    individual line parts of a ``MultiLineString``. Empty or missing geometries are
+    ignored.
+
+    Parameters
+    ----------
+    geom : shapely geometry
+        Geometry to iterate over. Supported geometry types are ``LineString`` and
+        ``MultiLineString``.
+
+    Yields
+    ------
+    shapely.geometry.LineString
+        Valid line geometries extracted from the input geometry.
+    """
     if geom is None or geom.is_empty:
         return
 
@@ -463,6 +579,29 @@ def _iter_lines(geom):
 
 
 def _orient_from_outside(line, polygon):
+    """
+    Orient a line from outside to inside a polygon.
+
+    The function checks whether exactly one endpoint of the line lies inside or on
+    the polygon boundary. If the line starts outside and ends inside, it is returned
+    unchanged. If it starts inside and ends outside, the coordinate order is
+    reversed. Lines with both endpoints inside, both endpoints outside, or fewer
+    than two coordinates are ignored.
+
+    Parameters
+    ----------
+    line : shapely.geometry.LineString
+        Line geometry to orient.
+    polygon : shapely geometry
+        Polygon or multipolygon used to determine whether the line endpoints are
+        inside the target area.
+
+    Returns
+    -------
+    shapely.geometry.LineString or None
+        Line oriented from outside to inside the polygon, or ``None`` if no clear
+        entry direction can be determined.
+    """
     coords = list(line.coords)
     if len(coords) < 2:
         return None
@@ -473,7 +612,7 @@ def _orient_from_outside(line, polygon):
     start_in = polygon.covers(start)
     end_in = polygon.covers(end)
 
-    # Nur klarer Eintrittsfall: genau ein Ende draußen, das andere drin
+    # Only one clear case of entry: exactly one end outside, the other inside
     if (not start_in) and end_in:
         return line
 
@@ -484,8 +623,29 @@ def _orient_from_outside(line, polygon):
 
 def _first_inside_point(line, polygon, eps_m=1000.0):
     """
-    Liefert einen Punkt knapp innerhalb des Polygons auf der Leitung,
-    orientiert von außen nach innen.
+    Return a point slightly inside a polygon along an oriented line.
+
+    The line is expected to be oriented from outside to inside the polygon. The
+    function intersects the line with the polygon, selects the first line segment
+    inside the polygon along the original line direction, and interpolates a point
+    slightly after the entry point. This avoids selecting a point exactly on the
+    polygon boundary.
+
+    Parameters
+    ----------
+    line : shapely.geometry.LineString
+        Pipeline geometry oriented from outside to inside the polygon.
+    polygon : shapely geometry
+        Polygon or multipolygon used to determine the inside section of the line.
+    eps_m : float, default 1000.0
+        Maximum inward offset distance along the line. The distance uses the units
+        of the input geometries.
+
+    Returns
+    -------
+    shapely.geometry.Point or None
+        Point located slightly inside the polygon along the line, or ``None`` if
+        the line does not enter the polygon with a valid line segment.
     """
     inside = line.intersection(polygon)
     if inside.is_empty:
@@ -496,7 +656,7 @@ def _first_inside_point(line, polygon, eps_m=1000.0):
     elif inside.geom_type == "MultiLineString":
         segments = [seg for seg in inside.geoms if not seg.is_empty]
     else:
-        # nur Punktberührung o.ä.
+        # only point contact or similar
         return None
 
     first_seg = None
@@ -514,7 +674,7 @@ def _first_inside_point(line, polygon, eps_m=1000.0):
     if first_seg is None:
         return None
 
-    # etwas nach innen gehen, damit der Punkt sicher in einer Region liegt
+    # move slightly inward so that the point lies securely within a region
     step = min(eps_m, max(first_seg.length * 0.01, 1.0))
     dist = min(first_proj + step, line.length)
 
@@ -530,10 +690,51 @@ def build_h2_pipeline_import_nodes_from_GGIT(
     entry_scope="country",   # "country" = erster onshore Bus, "model" = erster on/offshore Bus
 ):
     """
-    target_country_name z.B. 'Japan', 'Germany', ...
-    entry_scope:
-      - 'country': erster Eintritt ins onshore Landespolygon
-      - 'model'  : erster Eintritt ins gesamten Modellraum (onshore + offshore)
+    Build hydrogen pipeline import nodes from GGIT pipeline data.
+
+    The function identifies international pipeline projects that enter the target
+    country or model region, assigns each valid pipeline to the first bus region at
+    the selected entry boundary, converts the reported pipeline capacity to hydrogen
+    import capacity, and aggregates the resulting capacities by model node.
+
+    Parameters
+    ----------
+    pipelines : geopandas.GeoDataFrame
+        GGIT pipeline geometries. The dataframe must contain a geometry column,
+        pipeline capacity in ``capacity [MW]``, and country information readable by
+        ``_countries_from_row``. The optional column ``ProjectID`` is retained as
+        project metadata.
+    bus_regions_all : geopandas.GeoDataFrame
+        Onshore and offshore model bus regions. The dataframe must contain
+        ``geometry`` and ``gadm_id`` columns. Optional columns include ``country``
+        and ``is_offshore``.
+    bus_regions_onshore : geopandas.GeoDataFrame
+        Onshore model bus regions used to define the country entry polygon. The
+        dataframe must contain a geometry column and should use the same region
+        identifiers as ``bus_regions_all``.
+    h2_capacity_factor : float
+        Factor used to convert the reported pipeline capacity in MW to hydrogen
+        import capacity.
+    target_country_name : str
+        Name of the target country, for example ``"Japan"`` or ``"Germany"``.
+    entry_scope : {"country", "model"}, default "country"
+        Boundary used to determine the first entry point of a pipeline. ``"country"``
+        assigns the pipeline to the first onshore bus region entered within the
+        target country. ``"model"`` assigns the pipeline to the first bus region
+        entered within the full model domain, including offshore regions.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Aggregated hydrogen pipeline import nodes with the columns ``bus``,
+        ``p_nom``, ``source``, ``is_offshore``, ``country`` and ``project_id``.
+        ``project_id`` contains a list of GGIT project IDs contributing to each
+        aggregated node.
+
+    Raises
+    ------
+    ValueError
+        If ``entry_scope`` is neither ``"country"`` nor ``"model"``.
     """
     if pipelines.crs != bus_regions_all.crs:
         pipelines = pipelines.to_crs(bus_regions_all.crs)
@@ -567,14 +768,14 @@ def build_h2_pipeline_import_nodes_from_GGIT(
         if geom is None or geom.is_empty:
             continue
 
-        # 1) Nur internationale Leitungen betrachten
+        # 1) Consider only international lines
         countries = _countries_from_row(row)
         if target_country_name not in countries:
             continue
         if len(countries) < 2:
             continue
 
-        # 2) Kapazität muss bekannt sein
+        # 2) The capacity must be known
         capacity = row.get("capacity [MW]")
         if capacity is None or pd.isna(capacity):
             continue
@@ -593,7 +794,7 @@ def build_h2_pipeline_import_nodes_from_GGIT(
             if sample_point is None:
                 continue
 
-            # Region über spatial index suchen
+            # Search by region using the spatial index
             cand_idx = list(sindex.intersection(sample_point.bounds))
             if not cand_idx:
                 continue
@@ -606,7 +807,7 @@ def build_h2_pipeline_import_nodes_from_GGIT(
             if candidates.empty:
                 continue
 
-            # Bei model-entry optional offshore bevorzugen, falls Punkt noch nicht onshore ist
+            # When creating a model entry, optionally select "offshore" if the item is not yet "onshore"
             if entry_scope == "model" and "is_offshore" in candidates.columns:
                 if not country_geom.covers(sample_point):
                     candidates = candidates.sort_values("is_offshore", ascending=False)

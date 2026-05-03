@@ -3,7 +3,52 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
-Prepare import nodes.
+Build hydrogen import nodes from pipeline- and port-based import sources.
+
+Relevant Settings
+-----------------
+
+.. code:: yaml
+
+    countries:
+
+    imports:
+        sources:
+        limit:
+
+.. seealso::
+
+    Documentation of the configuration file ``config.yaml``.
+
+Inputs
+------
+
+- ``h2_pipeline_import_nodes``: CSV file with fixed pipeline-based hydrogen
+  import nodes and nominal import capacities.
+- ``export_ports``: CSV file with prepared port locations, country codes and
+  capacity allocation fractions.
+- ``regions_onshore``: GeoJSON file with onshore bus regions used to assign
+  port import locations to model nodes.
+
+Outputs
+-------
+
+- ``h2_import_nodes``: CSV file with aggregated maximum hydrogen import
+  capacities per model node, split into pipeline-based, port-based and total
+  import capacity.
+
+Description
+-----------
+
+The script builds model nodes for hydrogen imports from the import sources
+selected in the configuration. Pipeline-based import capacities are read as
+fixed capacities from the pipeline import table. Port-based import capacities
+are derived from the remaining annual import budget after subtracting the fixed
+pipeline import capacity, distributed across valid ports according to their
+capacity fractions, and mapped to onshore bus regions.
+
+The resulting table contains one row per import node with the maximum nominal
+pipeline, port and total hydrogen import capacity.
 """
 
 import logging
@@ -26,17 +71,24 @@ logger = logging.getLogger(__name__)
 
 def load_pipeline_import_nodes(path):
     """
-    Load and validate pipeline-based H2 import nodes.
+    Load and validate pipeline-based hydrogen import nodes.
 
     Parameters
     ----------
     path : str or path-like
-        Path to the pipeline import CSV.
+        Path to the CSV file containing pipeline-based hydrogen import nodes. The
+        file must contain the columns ``bus``, ``country`` and ``p_nom``.
 
     Returns
     -------
     pandas.DataFrame
-        Cleaned dataframe with at least the required columns.
+        Cleaned pipeline import table with valid bus names, country codes and
+        non-negative nominal import capacities.
+
+    Raises
+    ------
+    ValueError
+        If required columns are missing or negative ``p_nom`` values are found.
     """
     df = pd.read_csv(
         path,
@@ -73,32 +125,24 @@ def load_pipeline_import_nodes(path):
 
 def load_ports(path):
     """
-    Load ports prepared by prepare_ports.py.
-
-    Required columns
-    ----------------
-    country : str
-        Country code of the port.
-    x : float
-        Longitude of the port.
-    y : float
-        Latitude of the port.
-    fraction : float
-        Share of the national port capacity assigned to the port.
-
-    Optional columns
-    ----------------
-    name, Harbor Size, Harbor_size_nr
+    Load and validate prepared hydrogen import ports.
 
     Parameters
     ----------
     path : str or path-like
-        Path to the prepared ports CSV.
+        Path to the prepared ports CSV file. The file must contain the columns
+        ``country``, ``x``, ``y`` and ``fraction``.
 
     Returns
     -------
     pandas.DataFrame
-        Cleaned dataframe with at least the required columns.
+        Cleaned port table filtered to the model countries defined in the
+        configuration.
+
+    Raises
+    ------
+    ValueError
+        If required columns are missing or negative ``fraction`` values are found.
     """
     ports = pd.read_csv(
             path,
@@ -137,9 +181,31 @@ def load_ports(path):
 
 def get_remaining_port_budget(pipeline_p_nom_max_total):
     """
-    Remaining port budget after subtracting fixed pipeline import capacity.
+    Calculate the remaining port-based hydrogen import capacity budget.
+
+    The total annual hydrogen import limit is read from
+    ``snakemake.params.imports_config['limit']`` and converted from TWh/a to MW.
+    The fixed pipeline-based import capacity is subtracted from this limit. If the
+    pipeline capacity already reaches or exceeds the import limit, the remaining
+    port budget is set to zero.
+
+    Parameters
+    ----------
+    pipeline_p_nom_max_total : float
+        Total fixed pipeline-based hydrogen import capacity in MW.
+
+    Returns
+    -------
+    float
+        Remaining maximum nominal capacity in MW available for port-based hydrogen
+        imports.
+
+    Raises
+    ------
+    ValueError
+        If the import limit or the pipeline import capacity is negative.
     """
-    import_limit = snakemake.params.imports_config["limit"]
+    import_limit = snakemake.params.h2import
     import_limit = float(import_limit) * 1e6 / 8760  # Convert from TWh/a to MW
 
     if import_limit is None:
@@ -161,23 +227,31 @@ def get_remaining_port_budget(pipeline_p_nom_max_total):
 
 def assign_port_p_nom(ports, pipeline_p_nom_max_total):
     """
-    Assign maximum port-based H2 import capacity to ports.
+    Assign maximum port-based hydrogen import capacity to ports.
 
-    The total import limit is taken from the config via snakemake params.
-    Existing pipeline import capacity is subtracted beforehand.
-    The remaining budget is distributed across ports according to their fraction.
+    The remaining port import budget is calculated after subtracting fixed
+    pipeline-based import capacity from the total import limit. This remaining
+    budget is distributed across ports according to their normalized ``fraction``
+    values.
 
     Parameters
     ----------
     ports : pandas.DataFrame
-        Ports dataframe with at least the column ``fraction``.
+        Port table with at least the column ``fraction``.
     pipeline_p_nom_max_total : float
-        Total existing pipeline-based import capacity.
+        Total fixed pipeline-based hydrogen import capacity in MW.
 
     Returns
     -------
     pandas.DataFrame
-        Copy of ports dataframe with additional column ``p_nom_max``.
+        Copy of the port table with an additional ``p_nom_max`` column containing
+        the assigned maximum nominal port import capacity in MW.
+
+    Raises
+    ------
+    ValueError
+        If the ``fraction`` column is missing, contains negative values, or sums to
+        zero after cleaning.
     """
     ports = ports.copy()
 
@@ -212,19 +286,32 @@ def assign_port_p_nom(ports, pipeline_p_nom_max_total):
 
 def map_import_locations_to_nodes(df, regions_or_buses):
     """
-    Map import locations directly to bus regions.
+    Map hydrogen import locations to onshore model bus regions.
+
+    Import locations are first assigned to intersecting onshore bus regions. For
+    locations that do not intersect any region, the nearest onshore bus region is
+    used as a fallback. The result is restricted to one bus assignment per original
+    import location.
 
     Parameters
     ----------
     df : pandas.DataFrame
-        Import locations with columns x, y, country.
+        Import locations with at least the columns ``x``, ``y`` and ``country``.
     regions_or_buses : str or path-like
-        Path to onshore bus regions geojson.
+        Path to the onshore bus regions GeoJSON file. The file must contain the
+        columns ``name`` and ``geometry``.
 
     Returns
     -------
     pandas.DataFrame
-        Dataframe with an added column `bus`.
+        Import locations with an added ``bus`` column identifying the assigned
+        model node.
+
+    Raises
+    ------
+    ValueError
+        If required columns are missing from the import locations or the bus
+        regions file.
     """
     df = df.reset_index(drop=True).copy()
     df["port_id"] = df.index
@@ -305,30 +392,36 @@ def map_import_locations_to_nodes(df, regions_or_buses):
  
 def aggregate_h2_import_by_node(pipelines, ports, pipeline_p_nom_max_total, tol=1e-6):
     """
-    Aggregate pipeline and port-based H2 import capacities by model node.
+    Aggregate pipeline- and port-based hydrogen import capacities by model node.
+
+    Pipeline import capacities and assigned port import capacities are grouped by
+    ``bus`` and combined into one table. After aggregation, port import capacities
+    are capped to the remaining port budget as a final safety check.
 
     Parameters
     ----------
     pipelines : pandas.DataFrame
-        Dataframe of pipeline import nodes with at least:
-        - bus
-        - country
-        - p_nom
+        Pipeline import nodes with at least the columns ``bus`` and ``p_nom``.
     ports : pandas.DataFrame
-        Dataframe of mapped port import nodes with at least:
-        - bus
-        - country
-        - p_nom_max
+        Mapped port import nodes with at least the columns ``bus`` and
+        ``p_nom_max``.
+    pipeline_p_nom_max_total : float
+        Total fixed pipeline-based hydrogen import capacity in MW.
+    tol : float, default 1e-6
+        Numerical tolerance used when checking whether aggregated port capacity
+        exceeds the remaining port budget.
 
     Returns
     -------
     pandas.DataFrame
-        Aggregated import capacities per node with columns:
-        - bus
-        - country
-        - p_nom_max_pipeline
-        - p_nom_max_port
-        - p_nom_max_total
+        Aggregated hydrogen import capacities per model node with the columns
+        ``bus``, ``p_nom_max_pipeline``, ``p_nom_max_port`` and
+        ``p_nom_max_total``.
+
+    Raises
+    ------
+    ValueError
+        If required columns are missing from the pipeline or port tables.
     """
     pipeline_required = {"bus", "p_nom"}
     port_required = {"bus", "p_nom_max"}

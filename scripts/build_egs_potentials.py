@@ -3,7 +3,60 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
-Build EGS overlap, potentials, and optional capacity-factor profiles for PyPSA-Earth.
+Build enhanced geothermal system potentials and optional capacity-factor profiles.
+
+Relevant Settings
+-----------------
+.. code:: yaml
+
+    countries:
+    snapshots:
+
+.. seealso::
+
+    Documentation of the configuration file ``config.yaml``.
+
+Inputs
+------
+- ``egs_input``: CSV file with point-based enhanced geothermal system data from
+  Franzmann, Heinrichs and Stolten (2025), "Global geothermal electricity
+  potentials: A technical, economic, and thermal renewability assessment",
+  Renewable Energy, 250, 123199, and the associated Mendeley Data dataset
+  "Global Technical Energy Potentials of Enhanced Geothermal Systems".
+  https://www.sciencedirect.com/science/article/pii/S0960148125008614
+  The file includes coordinates, country identifiers, power output estimates
+  and LCOE values for different EGS reservoir models.
+- ``regions``: GeoJSON file with PyPSA-Earth network regions used to aggregate
+  point-based EGS potentials to model nodes.
+- ``temp_air_total``: Optional NetCDF file with hourly air temperatures per
+  network region used to derive temperature-dependent EGS capacity factors.
+
+Outputs
+-------
+- ``egs_potentials``: CSV file with maximum installable EGS capacity and CAPEX
+  per network region.
+- ``egs_capacity_factors``: Optional CSV file with hourly EGS capacity-factor
+  profiles per network region.
+
+Description
+-----------
+The script prepares enhanced geothermal system potentials for PyPSA-Earth from
+the global point-based EGS potential dataset published by Franzmann, Heinrichs
+and Stolten (2025). The underlying study assesses global geothermal electricity
+potentials from a technical, economic and thermal renewability perspective and
+compares three reservoir models: Gringarten, Volume Method and Sustainable
+Approach.
+
+For use in PyPSA-Earth, this script filters the input data to the configured
+model countries, uses the Gringarten power and LCOE estimates, converts power
+output from MW to GW, derives a CAPEX-like cost value from LCOE assumptions,
+and assigns each valid EGS point to a PyPSA-Earth network region.
+
+Point-level potentials are aggregated by network region. The resulting regional
+potential table contains the maximum installable EGS capacity and CAPEX used by
+the model. If air temperature input data and a corresponding output path are
+available, the script additionally builds temperature-dependent EGS
+capacity-factor profiles.
 """
 import geopandas as gpd
 import numpy as np
@@ -19,15 +72,31 @@ from _helpers import (
 
 logger = create_logger(__name__)
 
-HEAT_PER_GW_EL_FACTOR = 2347.0
-CRF = 0.09 # calculated with 0.08 interest rate
-CAPEX_TO_OPEX = 0.02 #assumtion 2% of Capex = Opex
+
+CRF = 0.09 # calculated with 0.08 interest rate see Franzmann et al.
+CAPEX_TO_OPEX = 0.02 #assumtion that 2% of Capex = Opex see Franzmann et al.
 HOURS = 8760.0
 
 
 def read_network_regions(network_regions_file):
     """
-    Read PyPSA-Earth onshore regions and use the region name as index.
+    Read PyPSA-Earth network regions and index them by region name.
+
+    Parameters
+    ----------
+    network_regions_file : str or path-like
+        Path to the network regions file. The file must contain a ``name`` column
+        and a geometry column.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Network regions indexed by ``name`` and assigned to CRS EPSG:4326.
+
+    Raises
+    ------
+    ValueError
+        If the network regions file does not contain a ``name`` column.
     """
     regions = gpd.read_file(network_regions_file)
 
@@ -43,13 +112,40 @@ def read_network_regions(network_regions_file):
 
 def prepare_egs_data(egs_file, countries, network_regions_file):
     """
-    Build a region-aggregated PyPSA-compatible EGS potential table from a custom CSV input.
+    Prepare region-aggregated enhanced geothermal system potentials.
 
-    Expected input columns:
-    lon, lat, gid1,
-    Pout_Gringarten_MW, LCOE_Gringarten_Eurct_per_kWh,
-    Pout_VolumeMethod_MW, LCOE_VolumeMethod_Eurct_per_kWh,
-    Pout_Sustainable_MW, LCOE_Sustainable_Eurct_per_kWh
+    The function reads point-based EGS input data, filters it to the configured
+    countries, keeps the Gringarten power and LCOE estimates, converts the power
+    output from MW to GW, derives CAPEX from LCOE and annual generation, and assigns
+    each point to a PyPSA-Earth network region. Potentials are then aggregated by
+    region.
+
+    Parameters
+    ----------
+    egs_file : str or path-like
+        Path to the EGS input CSV file. The file must contain coordinates,
+        ``gid1`` country or region identifiers, and the required EGS power and LCOE
+        columns.
+    countries : str or list-like
+        Model countries to keep. Two-letter country codes are converted to
+        three-letter country codes before filtering.
+    network_regions_file : str or path-like
+        Path to the PyPSA-Earth network regions file used to assign EGS points to
+        model regions.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Region-indexed dataframe with mean ``CAPEX``, summed ``PowerSust``, number
+        of assigned EGS points in ``n_points``, and ``p_nom_max`` equal to
+        ``PowerSust``.
+
+    Raises
+    ------
+    ValueError
+        If required input columns are missing, no rows remain after country
+        filtering, no valid positive-output EGS rows remain, or no EGS points can be
+        assigned to the provided network regions.
     """
     df = pd.read_csv(egs_file)
 
@@ -118,12 +214,11 @@ def prepare_egs_data(egs_file, countries, network_regions_file):
     capex = (df['LCOE_EUR_per_MWh'] * df['Leistung_MWh']) / (CRF + CAPEX_TO_OPEX)
 
     df['PowerSust'] = df['PowerSust_MW'] / 1000.0  # MW -> GW
-    df['HeatSust'] = df['PowerSust'] * HEAT_PER_GW_EL_FACTOR
     df['CAPEX'] = capex / df['PowerSust']  # EUR/GW
    
 
     point_gdf = gpd.GeoDataFrame(
-        df[['gid1', 'country_code', 'Lon', 'Lat', 'CAPEX', 'PowerSust', 'HeatSust']],
+        df[['gid1', 'country_code', 'Lon', 'Lat', 'CAPEX', 'PowerSust']],
         geometry=gpd.points_from_xy(df['Lon'], df['Lat']),
         crs='EPSG:4326',
     )
@@ -156,7 +251,6 @@ def prepare_egs_data(egs_file, countries, network_regions_file):
         .agg(
             CAPEX=('CAPEX', 'mean'),
             PowerSust=('PowerSust', 'sum'),
-            HeatSust=('HeatSust', 'sum'),
             n_points=('region', 'size'),
         )
         .sort_index()
@@ -168,16 +262,34 @@ def prepare_egs_data(egs_file, countries, network_regions_file):
     return region_agg
 
 
-
-
-
 def get_capacity_factors(network_regions_file, air_temperatures_file, snapshots=None):
     """
-    Performance of EGS is higher for lower temperatures, due to more efficient
-    air cooling Data from Ricks et al.: The Role of Flexible Geothermal Power
-    in Decarbonized Elec Systems.
-   
-    Replicates the PyPSA-Eur temperature-based EGS capacity factor adjustment.
+    Build temperature-dependent EGS capacity-factor profiles.
+
+    Enhanced geothermal system performance is adjusted based on deviations of
+    regional air temperature from the regional mean temperature. Lower-than-average
+    air temperatures increase the capacity factor, while higher-than-average
+    temperatures decrease it. The adjustment curve follows the PyPSA-Eur
+    temperature-based EGS capacity-factor approach.
+
+    Parameters
+    ----------
+    network_regions_file : str or path-like
+        Path to the network regions file. The file must contain a ``name`` column
+        matching the regional names in the air temperature dataset.
+    air_temperatures_file : str or path-like
+        Path to a NetCDF file containing air temperatures by network region and
+        time. The dataset must provide a ``temperature`` variable and a ``name``
+        dimension or coordinate matching the network region names.
+    snapshots : pandas.DatetimeIndex, optional
+        Snapshots for which capacity factors should be returned. If omitted, the
+        time index from the air temperature dataset is used.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Capacity-factor time series with snapshots as index and network region
+        names as columns. The index name is ``snapshot``.
     """
 
     # these values are taken from the paper's
@@ -226,20 +338,15 @@ if __name__ == "__main__":
 
     configure_logging(snakemake)
 
-    #egs_config = snakemake.params.sector["enhanced_geothermal"]
-    #sustainability_factor = egs_config.get("sustainability_factor", 0.0025)
-
     egs_data = prepare_egs_data(
         egs_file=snakemake.input.egs_input,
         countries=snakemake.params.countries,
         network_regions_file=snakemake.input.regions,
     )
 
+    egs_data["p_nom_max"] = egs_data["PowerSust"] 
 
-
-    egs_data["p_nom_max"] = egs_data["PowerSust"] #/ sustainability_factor
-
-    egs_data[[ "HeatSust", "p_nom_max", "CAPEX"]].to_csv(
+    egs_data[[ "p_nom_max", "CAPEX"]].to_csv(
         snakemake.output.egs_potentials
     )
 

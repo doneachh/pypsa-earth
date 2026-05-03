@@ -3212,7 +3212,6 @@ def add_enhanced_geothermal(
         Required columns:
             - p_nom_max  [GW_el]
             - CAPEX      [EUR/GW_el]
-            - HeatSust   [TWh_th]  (currently not used directly in the network logic)
     egs_config : dict
         sector.enhanced_geothermal config block.
         Expected keys include:
