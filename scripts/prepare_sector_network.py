@@ -78,6 +78,7 @@ def add_carrier_buses(n, carrier, nodes=None):
         marginal_cost=costs.at[carrier, "fuel"],
     )
 
+
 def add_electricity_grid_connection(n, costs):
     carriers = ["onwind", "solar"]
 
@@ -3378,7 +3379,7 @@ if __name__ == "__main__":
 
     if options.get("electricity_distribution_grid", False):
         add_electricity_distribution_grid(n, costs)
-    
+
     if options.get("electricity_grid_connection", False):
         add_electricity_grid_connection(n, costs)
 
