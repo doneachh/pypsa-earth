@@ -529,6 +529,14 @@ export:
     fill_time: 24 # hours, for 48h see Hampp2021
     unload_time: 24 # hours for 48h see Hampp2021
 
+import:
+  enable: true
+  limit: [470]  #TWh/a
+  sources: ["ports", "pipelines"] #it takes only existing pipelines and ports into account 
+  price:
+    H2_pipe: 30 # EUR/MWh 
+    H2_ship: 60  # EUR/MWh can be calculated by multiplying the price per tonne by the LHV of hydrogen (33.3333 MWh/t_H2)
+
 custom_data:
   renewables: [] # ['csp', 'rooftop-solar', 'solar']
   elec_demand: false
@@ -595,6 +603,12 @@ sector:
     blue_share: 0.40
     pink_share: 0.05
     production_technologies: ["H2 Electrolysis", "SMR", "SMR CC"] # ["Alkaline electrolyzer large", "Alkaline electrolyzer medium", "Alkaline electrolyzer small", "PEM electrolyzer", "SOEC", "Solid biomass steam reforming", "Biomass gasification", "Biomass gasification CC", "Natural gas steam reforming", "Natural gas steam reforming CC", "Coal gasification", "Coal gasification CC", "Heavy oil partial oxidation"] a list of H2 production technologies that can be added
+  enhanced_geothermal:
+    enable: true        # Enable Enhanced Geothermal Systems (EGS) in the sector network.
+    var_cf: true        # Use time-varying regional capacity factors for EGS; requires an EGS capacity-factor input file.
+    flexible: true      # Add a geothermal heat reservoir StorageUnit to allow flexible shifting of heat output.
+    max_hours: 240      # Storage duration of the geothermal heat reservoir in hours, relative to its nominal power capacity.
+    max_boost: 0.25     # Maximum short-term discharge boost from the reservoir, expressed as a fraction of nominal capacity.
 
   coal:
     spatial_coal: true
@@ -972,6 +986,9 @@ plotting:
     biogas: "#23932d"
     waste: "#68896b"
     geothermal: "#ba91b1"
+    geothermal heat: "#ba91b1"
+    geothermal district heat: "#ba91b1"
+    geothermal organic rankine cycle: "#ba91b1"
     OCGT: "#d35050"
     OCGT marginal: "sandybrown"
     OCGT-heat: "#ee8340"
@@ -1010,6 +1027,7 @@ plotting:
     battery: "slategray"
     battery discharger: "slategray"
     battery charger: "slategray"
+    battery storage: "slategray"
     EV battery storage: "slategray"
     home battery: "#614700"
     home battery storage: "#614700"
