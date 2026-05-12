@@ -1128,7 +1128,7 @@ if not snakemake.params.custom_gas_network:
         bus_regions_onshore,
         bus_regions_offshore,
         bus_regions_all,
-        model_borders, #muss noch entfernt werden 
+        model_borders,
         country_borders,
     ) = load_bus_regions(
         snakemake.input.regions_onshore,

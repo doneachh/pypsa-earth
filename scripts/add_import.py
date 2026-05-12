@@ -152,13 +152,11 @@ def add_port_h2_imports(n, import_nodes):
 
     base_names = df["bus"].astype(str)
     df = df.set_index(base_names)
-    #names = df["bus"].astype(str) + " import H2 port"
 
     n.madd(
         "Generator",
         df.index,
         suffix=" import H2 port",
-        #names,
         bus=df["h2_bus"],
         carrier="H2",
         p_nom_extendable=True,

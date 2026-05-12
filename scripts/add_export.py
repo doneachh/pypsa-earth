@@ -63,12 +63,11 @@ def select_ports(n):
     ports_sel = ports.loc[~ports[gcol].duplicated(keep="first")].set_index(gcol)
 
     # Select the hydrogen buses based on nodes with ports
-    #hydrogen_buses_ports = n.buses.loc[ports_sel.index + " H2"] #old 
-
+    
     hydrogen_buses_ports = n.buses[
     n.buses.index.str.endswith(" H2") &
     n.buses.index.str.startswith(tuple(ports_sel.index + "_"))
-    ] # new 
+    ]  
 
     hydrogen_buses_ports.index.name = "Bus"
 

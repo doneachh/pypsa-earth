@@ -1,98 +1,218 @@
 # -*- coding: utf-8 -*-
-# SPDX-FileCopyrightText:  PyPSA-Earth Authors
+# SPDX-FileCopyrightText: PyPSA-Earth Authors
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# -*- coding: utf-8 -*-
 """
 This script processes global building data to calculate solar rooftop area.
+
+Memory-efficient version:
+The input parquet file is read in batches and each batch is spatially joined to
+the onshore regions. Only the aggregated rooftop area per region is kept in RAM.
 """
-import country_converter as coco
+
+import gc
+import os
+from pathlib import Path
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from _helpers import (
-    BASE_DIR,
-    configure_logging,
-    create_logger,
-)
-from shapely import Point
-
-cc = coco.CountryConverter()
+import pyarrow.parquet as pq
+from _helpers import configure_logging, create_logger
 
 logger = create_logger(__name__)
 
 
+def _prepare_install_ratio_lookup(install_ratio):
+    """
+    Prepare sorted threshold arrays for vectorized lookup of install ratios.
+    """
+    install_ratio = {float(k): float(v) for k, v in install_ratio.items()}
+    keys = np.array(sorted(install_ratio.keys()), dtype="float64")
+    values = np.array([install_ratio[k] for k in keys], dtype="float64")
+    return keys, values
+
+
+def _calculate_useful_area(area, keys, values):
+    """
+    Calculate useful rooftop area from building footprint area.
+
+    The largest threshold <= building area is used, matching the logic of the
+    original get_ratio() implementation.
+    """
+    area = np.asarray(area, dtype="float64")
+    idx = np.searchsorted(keys, area, side="right") - 1
+
+    ratios = np.zeros(len(area), dtype="float64")
+    valid = idx >= 0
+    ratios[valid] = values[idx[valid]]
+
+    return area * ratios
+
+
+def _prepare_shapes_country(shapes, country_code, distance_crs):
+    """
+    Prepare country-specific region geometries for spatial joins.
+    """
+    shapes_country = shapes[shapes.country == country_code].copy()
+
+    if shapes_country.empty:
+        raise ValueError(
+            f"No onshore bus regions found for country '{country_code}'. "
+            "Check the 'country' column in regions_onshore."
+        )
+
+    # The original script uses set_index("name"). For sjoin we need 'name'
+    # as a normal column, and for output we need it as the series index.
+    if "name" not in shapes_country.columns:
+        shapes_country = shapes_country.reset_index()
+
+    if "name" not in shapes_country.columns:
+        raise KeyError("The regions_onshore file must contain a 'name' column or index.")
+
+    shapes_country = shapes_country[["name", "country", "geometry"]].to_crs(distance_crs)
+    return shapes_country
+
+
+def _add_grouped_area(accumulator, joined):
+    """
+    Add grouped useful_area values from one spatial join result to accumulator.
+    """
+    if joined.empty or "name" not in joined.columns:
+        return accumulator
+
+    joined = joined[joined["name"].notna()]
+    if joined.empty:
+        return accumulator
+
+    grouped = joined.groupby("name")["usefull_area"].sum()
+    return accumulator.add(grouped, fill_value=0.0)
+
+
 def calculate_solar_rooftop_area(
-    df,
+    country_buildings,
     country_code,
     shapes,
     output,
     crs,
     install_ratio,
     tolerance=100,
+    batch_size=250_000,
 ):
     """
-    Calculates the usable solar rooftop area for buildings within a country, considering
-    that only a portion of each rooftop can be allocated for PV installation based on its size.
-    Smaller buildings are less likely to host PV systems, while larger buildings can dedicate
-    a greater share of their rooftop to PVs. This approach is based on the methodology
-    described in a paper by Hideaki Obane (https://eneken.ieej.or.jp/data/12710.pdf).
+    Calculate usable solar rooftop area per region from global building data.
 
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        DataFrame containing building areas and center points.
-    country_code : str
-        The ISO2 country code.
-    shapes : geopandas.GeoDataFrame
-        GeoDataFrame of regional shapes with 'country' and 'geometry' columns.
-    output : str
-        The file path to save the calculated solar rooftop area.
-    crs : dict
-        A dictionary containing coordinate reference systems (CRS) for 'distance_crs' and 'geo_crs'.
-    install_ratio : dict
-        A dictionary mapping building area thresholds to solar installation ratios.
-    tolerance : int, optional
-        Maximum distance in kilometers for spatial join to find nearest shapes.
-        The default is 100.
+    This memory-efficient implementation avoids loading all buildings into RAM.
+    It reads the parquet file in batches, performs the spatial join batch-wise,
+    and keeps only one aggregated Series in memory.
     """
     distance_crs = crs["distance_crs"]
     geo_crs = crs["geo_crs"]
 
-    keys = np.array(sorted(install_ratio.keys()))
-    values = np.array([install_ratio[k] for k in keys])
+    keys, values = _prepare_install_ratio_lookup(install_ratio)
 
-    def get_ratio(area):
-        # find the largest key <= area
-        idx = np.searchsorted(keys, area, side="right") - 1
-        if idx < 0:
-            return np.nan  # or 0 if you prefer a default
-        return values[idx]
+    shapes_country = _prepare_shapes_country(shapes, country_code, distance_crs)
 
-    df["usefull_area"] = df["area"] * df["area"].apply(get_ratio)
-    gdf = gpd.GeoDataFrame(df, geometry="center", crs=geo_crs).to_crs(distance_crs)
-    shapes_country = shapes[shapes.country == country_code].to_crs(distance_crs)
+    accumulator = pd.Series(
+        0.0,
+        index=pd.Index(shapes_country["name"].to_numpy(), name="name"),
+        name="usefull_area",
+        dtype="float64",
+    )
 
-    joined = gpd.sjoin(gdf, shapes_country, how="left", predicate="intersects")
-    unmatched = joined[joined.name.isna()]
-    unmatched = unmatched.drop(["name", "country"], axis=1)
+    parquet_file = pq.ParquetFile(country_buildings)
 
-    if not unmatched.empty:
-        nearest = gpd.sjoin_nearest(
-            unmatched,
-            shapes_country,
-            max_distance=tolerance * 1e3,
+    required_columns = ["area", "x", "y"]
+    available_columns = set(parquet_file.schema.names)
+    missing_columns = [c for c in required_columns if c not in available_columns]
+    if missing_columns:
+        raise KeyError(
+            f"Missing columns in {country_buildings}: {missing_columns}. "
+            "Expected columns are 'area', 'x', and 'y'."
         )
 
-        # Replace the unmatched rows in `joined` with the nearest results
-        matched = joined[joined.name.notna()]
-        joined = pd.concat([matched, nearest], ignore_index=True)
+    logger.info(
+        f"Aggregating global buildings for {country_code} in batches of "
+        f"{batch_size:,} rows"
+    )
 
-    usefull_area = joined.groupby("name")["usefull_area"].sum()
-    shapes_country["usefull_area"] = shapes_country.index.map(usefull_area)
+    for batch_no, batch in enumerate(
+        parquet_file.iter_batches(columns=required_columns, batch_size=batch_size),
+        start=1,
+    ):
+        df = batch.to_pandas()
 
-    # Save file
-    shapes_country["usefull_area"].to_csv(output)
+        if df.empty:
+            continue
+
+        df = df.dropna(subset=["area", "x", "y"])
+        if df.empty:
+            continue
+
+        df["usefull_area"] = _calculate_useful_area(df["area"].to_numpy(), keys, values)
+
+        # Buildings with zero useful area cannot contribute to the result.
+        df = df[df["usefull_area"] > 0.0]
+        if df.empty:
+            continue
+
+        # Create point geometries only for the current batch.
+        df = df.reset_index(drop=True)
+        df["building_id"] = np.arange(len(df))
+
+        gdf = gpd.GeoDataFrame(
+            df[["building_id", "usefull_area"]],
+            geometry=gpd.points_from_xy(df["x"], df["y"]),
+            crs=geo_crs,
+        ).to_crs(distance_crs)
+
+        # First try exact point-in-polygon assignment.
+        joined = gpd.sjoin(
+            gdf,
+            shapes_country[["name", "country", "geometry"]],
+            how="left",
+            predicate="intersects",
+        )
+        joined = joined.sort_values("building_id").drop_duplicates("building_id")
+        matched = joined[joined["name"].notna()]
+        accumulator = _add_grouped_area(accumulator, matched)
+
+        # For buildings not inside a region, use nearest region within tolerance.
+        unmatched = joined[joined["name"].isna()]
+        if not unmatched.empty:
+            cols_to_drop = [
+                c for c in ["name", "country", "index_right"] if c in unmatched.columns
+            ]
+            unmatched = unmatched.drop(columns=cols_to_drop)
+
+            nearest = gpd.sjoin_nearest(
+                unmatched,
+                shapes_country[["name", "country", "geometry"]],
+                how="left",
+                max_distance=tolerance * 1e3,
+            )
+            nearest = nearest.sort_values("building_id").drop_duplicates("building_id")
+
+            accumulator = _add_grouped_area(accumulator, nearest)
+
+            del nearest, unmatched
+
+        if batch_no % 10 == 0:
+            logger.info(f"Processed {batch_no} parquet batches")
+
+        del df, gdf, joined, matched, batch
+        gc.collect()
+
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+
+    # Same output structure as the original:
+    # CSV with index name 'name' and column 'usefull_area'.
+    accumulator = accumulator.reindex(shapes_country["name"].to_numpy()).fillna(0.0)
+    accumulator.index.name = "name"
+    accumulator.name = "usefull_area"
+    accumulator.to_csv(output)
+
+    logger.info(f"Saved solar rooftop layout to {output}")
 
 
 if __name__ == "__main__":
@@ -100,16 +220,17 @@ if __name__ == "__main__":
         from _helpers import mock_snakemake
 
         snakemake = mock_snakemake(
-            "cluster_global_buildings", simpl="", clusters=10, country="NG"
+            "cluster_global_buildings",
+            simpl="",
+            clusters=10,
+            country="NG",
         )
 
     configure_logging(snakemake)
+
     country_code = snakemake.wildcards.country
 
-    # Retrieve files
     logger.info(f"Reading Global Buildings for {country_code}")
-    df = pd.read_parquet(snakemake.input.country_buildings)
-    df["center"] = df.apply(lambda row: Point(row["x"], row["y"]), axis=1)
 
     shapes = gpd.read_file(snakemake.input.regions_onshore).set_index("name")[
         ["country", "geometry"]
@@ -118,12 +239,22 @@ if __name__ == "__main__":
     if snakemake.params.solar_rooftop_enable:
         logger.info(f"Calculate solar rooftop area for {country_code}")
 
+        # Can be changed without editing the Snakefile, e.g.:
+        # GLOBAL_BUILDINGS_BATCH_SIZE=100000 snakemake -j1 ...
+        batch_size = int(os.environ.get("GLOBAL_BUILDINGS_BATCH_SIZE", "250000"))
+
         calculate_solar_rooftop_area(
-            df,
+            snakemake.input.country_buildings,
             country_code,
             shapes,
             snakemake.output.solar_rooftop_layout,
             crs=snakemake.params.crs,
             install_ratio=snakemake.params.install_ratio,
             tolerance=snakemake.params.tolerance,
+            batch_size=batch_size,
         )
+    else:
+        logger.warning("solar_rooftop_enable is False. Writing an empty output file.")
+        output = Path(snakemake.output.solar_rooftop_layout)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        pd.Series(dtype="float64", name="usefull_area").to_csv(output)
