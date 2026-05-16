@@ -11,6 +11,10 @@ import os
 import country_converter as coco
 import geopandas as gpd
 import pandas as pd
+import gc
+from pathlib import Path
+import pyarrow as pa
+import pyarrow.parquet as pq
 from _helpers import (
     BASE_DIR,
     configure_logging,
@@ -78,8 +82,180 @@ def download_global_buildings_url(update=False):
 
     return df_url
 
-
 def get_building_area_center(df, crs):
+    """
+    Calculates the area and centroid of buildings from Microsoft Global Buildings
+    quadrant files.
+
+    This version processes one quadrant at a time and explicitly frees memory
+    after each quadrant.
+    """
+    tqdm_kwargs = dict(
+        ascii=False,
+        unit=" quadrants",
+        desc="Merge Buildings ",
+    )
+
+    for i in tqdm(df.index, **tqdm_kwargs):
+        url = df.loc[i, "Url"]
+
+        # Load only one quadrant
+        geo_df = pd.read_json(url, lines=True)
+
+        if geo_df.empty:
+            del geo_df
+            gc.collect()
+            continue
+
+        # Convert JSON geometries to shapely geometries
+        geometries = geo_df["geometry"].apply(geometry.shape)
+
+        # Free raw JSON dataframe as early as possible
+        del geo_df
+        gc.collect()
+
+        gdf = gpd.GeoDataFrame(
+            geometry=geometries,
+            crs=crs["geo_crs"],
+        )
+
+        del geometries
+        gc.collect()
+
+        # Calculate area in projected CRS
+        area_gdf = gdf.to_crs(crs["area_crs"])
+        area = area_gdf.geometry.area.round().astype("int64").to_numpy()
+
+        del area_gdf
+        gc.collect()
+
+        # Calculate centroids and transform back to geographic CRS
+        center = (
+            gdf.to_crs(crs["distance_crs"])
+            .geometry.centroid
+            .to_crs(crs["geo_crs"])
+        )
+
+        result = pd.DataFrame(
+            {
+                "area": area,
+                "x": center.x.to_numpy(dtype="float64"),
+                "y": center.y.to_numpy(dtype="float64"),
+            }
+        )
+
+        del gdf, area, center
+        gc.collect()
+
+        yield result
+
+        # Free yielded result after it has been written by the caller
+        del result
+        gc.collect()
+
+
+def download_global_buildings(country_code, country_buildings_fn, crs, update=False):
+    """
+    Downloads global building data for a specific country and writes the processed
+    result incrementally to a single parquet file.
+
+    Compared to the original implementation, this avoids
+
+        pd.concat(list(...))
+
+    and therefore does not keep all building quadrants in RAM at once.
+    """
+    logger.info(f"Downloading Global Buildings for {country_code}")
+
+    df_url = download_global_buildings_url(update=update)
+    df_url = df_url[df_url.Country == country_code]
+
+    output_path = Path(country_buildings_fn)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_output_path = output_path.with_suffix(output_path.suffix + ".tmp")
+
+    if tmp_output_path.exists():
+        tmp_output_path.unlink()
+
+    if output_path.exists():
+        output_path.unlink()
+
+    writer = None
+    schema = None
+    total_rows = 0
+
+    try:
+        for part_df in get_building_area_center(df_url, crs):
+            if part_df.empty:
+                continue
+
+            # Ensure stable dtypes across all parquet row groups
+            part_df = part_df.astype(
+                {
+                    "area": "int64",
+                    "x": "float64",
+                    "y": "float64",
+                }
+            )
+
+            table = pa.Table.from_pandas(part_df, preserve_index=False)
+
+            if writer is None:
+                schema = table.schema
+                writer = pq.ParquetWriter(
+                    tmp_output_path,
+                    schema,
+                    compression="snappy",
+                )
+            else:
+                table = table.cast(schema, safe=False)
+
+            writer.write_table(table)
+            total_rows += table.num_rows
+
+            del part_df, table
+            gc.collect()
+
+        if writer is not None:
+            writer.close()
+            writer = None
+        else:
+            # Create an empty parquet file if no buildings were found
+            empty_schema = pa.schema(
+                [
+                    ("area", pa.int64()),
+                    ("x", pa.float64()),
+                    ("y", pa.float64()),
+                ]
+            )
+            empty_table = pa.Table.from_arrays(
+                [
+                    pa.array([], type=pa.int64()),
+                    pa.array([], type=pa.float64()),
+                    pa.array([], type=pa.float64()),
+                ],
+                schema=empty_schema,
+            )
+            pq.write_table(empty_table, tmp_output_path, compression="snappy")
+
+        tmp_output_path.replace(output_path)
+
+        logger.info(
+            f"Saving Global Buildings for {country_code}: "
+            f"{total_rows:,} buildings written to {output_path}"
+        )
+
+    except Exception:
+        if writer is not None:
+            writer.close()
+
+        if tmp_output_path.exists():
+            tmp_output_path.unlink()
+
+        raise
+
+def get_building_area_center_old(df, crs):
     """
     Calculates the area and centroid of buildings from a DataFrame of building geometries.
 
@@ -118,7 +294,7 @@ def get_building_area_center(df, crs):
         )
 
 
-def download_global_buildings(country_code, country_buildings_fn, crs, update=False):
+def download_global_buildings_old(country_code, country_buildings_fn, crs, update=False):
     """
     Downloads global building data for a specific country using links from the
     Microsoft Global Buildings dataset (https://github.com/microsoft/GlobalMLBuildingFootprints).

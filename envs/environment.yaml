@@ -12,7 +12,7 @@ dependencies:
 - pip
 
 - pypsa>=0.25.1, <=0.30.3
-- atlite>=0.4.1
+- atlite>=0.4.1,<0.5
 - dask
 - powerplantmatching>=0.8
 - earth-osm>=2.3.post1
@@ -28,7 +28,7 @@ dependencies:
 - pyscipopt
 - lxml
 - numpy<2
-- pandas
+- pandas<3
 - geopandas>=1
 - fiona>=1.10
 - xarray>=2023.11.0, <=2025.01.2
