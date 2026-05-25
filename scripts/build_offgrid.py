@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohamed Amine Chebaane
+
+# SPDX-License-Identifier: CC-BY-4.0
 """
 build_offgrid.py
 =================
@@ -51,6 +54,7 @@ logger = logging.getLogger(__name__)
 # HILFSFUNKTIONEN – Elektrifizierungsdaten
 # ══════════════════════════════════════════════════════
 
+
 def load_electrification_data_from_path(path):
     """
     Laedt Elektrifizierungsdaten aus einer CSV-Datei.
@@ -69,14 +73,16 @@ def load_electrification_data_from_path(path):
         logger.warning(f"Elektrifizierungsdaten nicht gefunden: {path}")
         return None, 0.23
 
-    df      = pd.read_csv(path)
+    df = pd.read_csv(path)
     nat_row = df[df["GADM_ID"] == "National Average"]["Access to electricity"].values
     nat_avg = float(nat_row[0]) / 100 if len(nat_row) > 0 else 0.23
-    df_reg  = df[df["GADM_ID"] != "National Average"].dropna(subset=["GADM_ID"])
-    elec_dict = dict(zip(
-        df_reg["GADM_ID"].str.strip(),
-        df_reg["Access to electricity"].astype(float) / 100
-    ))
+    df_reg = df[df["GADM_ID"] != "National Average"].dropna(subset=["GADM_ID"])
+    elec_dict = dict(
+        zip(
+            df_reg["GADM_ID"].str.strip(),
+            df_reg["Access to electricity"].astype(float) / 100,
+        )
+    )
     country = os.path.basename(path).split("_")[0]
     logger.info(f"  {country}: {len(elec_dict)} Regionen | Ø {nat_avg*100:.1f}%")
     return elec_dict, nat_avg
@@ -101,7 +107,7 @@ def load_all_electrification_data(elec_data_files):
         elec_data_files = [elec_data_files]
 
     elec_data_combined = {}
-    national_avg       = 0.23  # Fallback
+    national_avg = 0.23  # Fallback
 
     for path in elec_data_files:
         ed, nav = load_electrification_data_from_path(path)
@@ -113,12 +119,15 @@ def load_all_electrification_data(elec_data_files):
         logger.warning("Keine Elektrifizierungsdaten gefunden → Heuristik")
         return None, national_avg
 
-    logger.info(f"Gesamt: {len(elec_data_combined)} Regionen aus {len(elec_data_files)} Laendern")
+    logger.info(
+        f"Gesamt: {len(elec_data_combined)} Regionen aus {len(elec_data_files)} Laendern"
+    )
     return elec_data_combined, national_avg
 
 
-def get_electrification_rate(gadm_id, distance_km, pop_density,
-                              elec_data=None, national_avg=0.23):
+def get_electrification_rate(
+    gadm_id, distance_km, pop_density, elec_data=None, national_avg=0.23
+):
     """
     Gibt Elektrifizierungsrate zurueck – echte Daten oder Heuristik.
 
@@ -131,15 +140,23 @@ def get_electrification_rate(gadm_id, distance_km, pop_density,
         return national_avg, "National Avg"
 
     # Heuristik – Quelle: Weltbank (2022), eigene Ableitung
-    if distance_km > 100:   base = 0.15
-    elif distance_km > 50:  base = 0.30
-    elif distance_km > 25:  base = 0.55
-    else:                   base = 0.76
+    if distance_km > 100:
+        base = 0.15
+    elif distance_km > 50:
+        base = 0.30
+    elif distance_km > 25:
+        base = 0.55
+    else:
+        base = 0.76
 
-    if pop_density > 500:   f = 1.2
-    elif pop_density > 100: f = 1.0
-    elif pop_density > 25:  f = 0.8
-    else:                   f = 0.6
+    if pop_density > 500:
+        f = 1.2
+    elif pop_density > 100:
+        f = 1.0
+    elif pop_density > 25:
+        f = 0.8
+    else:
+        f = 0.6
 
     return round(min(base * f, 1.0), 4), "Heuristik"
 
@@ -148,6 +165,7 @@ def get_electrification_rate(gadm_id, distance_km, pop_density,
 # HILFSFUNKTIONEN – Solar Profile
 # ══════════════════════════════════════════════════════
 
+
 def get_solar_profile_from_era5(centroid_x, centroid_y, cutout, n_hours):
     """
     Echtes Solarprofil aus ERA5-Wetterdaten.
@@ -155,12 +173,11 @@ def get_solar_profile_from_era5(centroid_x, centroid_y, cutout, n_hours):
     """
     cutout_point = cutout.sel(
         x=slice(centroid_x - 0.3, centroid_x + 0.3),
-        y=slice(centroid_y - 0.3, centroid_y + 0.3)
+        y=slice(centroid_y - 0.3, centroid_y + 0.3),
     )
-    influx    = (cutout_point.data["influx_direct"] +
-                 cutout_point.data["influx_diffuse"])
+    influx = cutout_point.data["influx_direct"] + cutout_point.data["influx_diffuse"]
     influx_ts = influx.mean(dim=["x", "y"]).values[:n_hours]
-    max_val   = influx_ts.max()
+    max_val = influx_ts.max()
     if max_val > 0:
         return influx_ts / max_val
     return solar_profile_fallback(n_hours)
@@ -169,10 +186,10 @@ def get_solar_profile_from_era5(centroid_x, centroid_y, cutout, n_hours):
 def load_profile(n_hours):
     """Tagesprofil fuer laendliche Haushalte."""
     hours = np.arange(n_hours)
-    hod   = hours % 24
-    p     = np.ones(n_hours) * 0.6
-    p[hod >= 6]  = 0.8
-    p[hod >= 9]  = 0.6
+    hod = hours % 24
+    p = np.ones(n_hours) * 0.6
+    p[hod >= 6] = 0.8
+    p[hod >= 9] = 0.6
     p[hod >= 17] = 1.0
     p[hod >= 21] = 0.7
     p[hod >= 23] = 0.4
@@ -182,10 +199,10 @@ def load_profile(n_hours):
 def solar_profile_fallback(n_hours):
     """Fallback Solarprofil falls ERA5 nicht verfuegbar."""
     hours = np.arange(n_hours)
-    hod   = hours % 24
-    s     = np.zeros(n_hours)
-    s[hod >= 6]  = 0.3
-    s[hod >= 9]  = 0.7
+    hod = hours % 24
+    s = np.zeros(n_hours)
+    s[hod >= 6] = 0.3
+    s[hod >= 9] = 0.7
     s[hod >= 11] = 0.9
     s[hod >= 13] = 0.8
     s[hod >= 16] = 0.4
@@ -197,9 +214,10 @@ def solar_profile_fallback(n_hours):
 # HILFSFUNKTIONEN – Geo-Logik
 # ══════════════════════════════════════════════════════
 
-def identify_offgrid_counties(shapes, bus_geom, bus_load_mw,
-                               bus_max_line_loading, elec_data,
-                               national_avg, cfg):
+
+def identify_offgrid_counties(
+    shapes, bus_geom, bus_load_mw, bus_max_line_loading, elec_data, national_avg, cfg
+):
     """
     Layer 1 – Geo-Logik: Identifiziert Offgrid-Counties.
 
@@ -218,10 +236,10 @@ def identify_offgrid_counties(shapes, bus_geom, bus_load_mw,
     offgrid_rows = []
 
     for _, region in shapes.iterrows():
-        gadm_id     = region["GADM_ID"]
-        centroid    = region.geometry.centroid
-        dist_km     = (bus_geom.geometry.distance(centroid) * 111).min()
-        area_km2    = region.geometry.area * (111 ** 2)
+        gadm_id = region["GADM_ID"]
+        centroid = region.geometry.centroid
+        dist_km = (bus_geom.geometry.distance(centroid) * 111).min()
+        area_km2 = region.geometry.area * (111**2)
         pop_density = region["pop"] / area_km2 if area_km2 > 0 else 0
 
         elec_rate, elec_src = get_electrification_rate(
@@ -233,27 +251,37 @@ def identify_offgrid_counties(shapes, bus_geom, bus_load_mw,
         # C2: Elektrifizierungsrate
         c2 = (elec_rate < cfg["max_elec_rate"]) if cfg["use_c2_elec_rate"] else True
         # C3: Bevoelkerungsdichte
-        c3 = (pop_density > cfg["min_pop_density"]) if cfg["use_c3_pop_density"] else True
+        c3 = (
+            (pop_density > cfg["min_pop_density"])
+            if cfg["use_c3_pop_density"]
+            else True
+        )
         # C4: Baseline-Last zu klein → Region zu klein fuer Hauptnetz
-        nearest_bus  = bus_geom.geometry.distance(centroid).idxmin()
+        nearest_bus = bus_geom.geometry.distance(centroid).idxmin()
         nearest_load = bus_load_mw.get(nearest_bus, 0.0)
         c4 = (nearest_load < cfg["c4_max_load_mw"]) if cfg["use_c4_low_load"] else True
         # C5: Leitungsauslastung (Szenario C – Offgrid entlastet Netz)
         nearest_loading = bus_max_line_loading.get(nearest_bus, 0.0)
-        c5 = (nearest_loading > cfg["c5_line_loading"]) if cfg["use_c5_congestion"] else True
+        c5 = (
+            (nearest_loading > cfg["c5_line_loading"])
+            if cfg["use_c5_congestion"]
+            else True
+        )
 
         if c1 and c2 and c3 and c4 and c5:
-            offgrid_rows.append({
-                "gadm_id":    gadm_id,
-                "population": int(region["pop"]),
-                "elec_rate":  elec_rate,
-                "elec_source":elec_src,
-                "distance_km":round(dist_km, 1),
-                "pop_density":round(pop_density, 1),
-                "centroid_x": centroid.x,
-                "centroid_y": centroid.y,
-                "geometry":   region.geometry,
-            })
+            offgrid_rows.append(
+                {
+                    "gadm_id": gadm_id,
+                    "population": int(region["pop"]),
+                    "elec_rate": elec_rate,
+                    "elec_source": elec_src,
+                    "distance_km": round(dist_km, 1),
+                    "pop_density": round(pop_density, 1),
+                    "centroid_x": centroid.x,
+                    "centroid_y": centroid.y,
+                    "geometry": region.geometry,
+                }
+            )
 
     return pd.DataFrame(offgrid_rows)
 
@@ -262,8 +290,18 @@ def identify_offgrid_counties(shapes, bus_geom, bus_load_mw,
 # HILFSFUNKTIONEN – Mini-Grid hinzufügen
 # ══════════════════════════════════════════════════════
 
-def add_offgrid_bus(n, region_id, population, centroid_x, centroid_y,
-                    cfg, cutout, annuity_factor, snapshots):
+
+def add_offgrid_bus(
+    n,
+    region_id,
+    population,
+    centroid_x,
+    centroid_y,
+    cfg,
+    cutout,
+    annuity_factor,
+    snapshots,
+):
     """
     Fuegt einen isolierten Offgrid-Bus + Komponenten zum Netzwerk hinzu.
 
@@ -284,72 +322,83 @@ def add_offgrid_bus(n, region_id, population, centroid_x, centroid_y,
     n_hours = len(snapshots)
 
     # ✅ Isolierten Bus hinzufuegen (kein Link zum Hauptnetz)
-    n.add("Bus", bus_name,
-          carrier="offgrid-AC",
-          x=centroid_x,
-          y=centroid_y,
-          v_nom=0.4)  # 400V Niederspannung – typisch fuer Minigrids
+    n.add(
+        "Bus", bus_name, carrier="offgrid-AC", x=centroid_x, y=centroid_y, v_nom=0.4
+    )  # 400V Niederspannung – typisch fuer Minigrids
 
     # ✅ Last in MW: kWh/yr / 8760h / 1000 = MW
     avg_load_mw = population * cfg["kwh_per_person_yr"] / 8760 / 1000
-    lp  = load_profile(n_hours) * avg_load_mw
+    lp = load_profile(n_hours) * avg_load_mw
     lts = pd.Series(lp, index=snapshots)
-    n.add("Load", f"load_{region_id}",
-          bus=bus_name,
-          p_set=lts)
+    n.add("Load", f"load_{region_id}", bus=bus_name, p_set=lts)
 
     # Solar Profil – ERA5 oder Fallback
     if cutout is not None:
         try:
-            sp        = get_solar_profile_from_era5(centroid_x, centroid_y, cutout, n_hours)
+            sp = get_solar_profile_from_era5(centroid_x, centroid_y, cutout, n_hours)
             solar_src = "ERA5"
         except Exception as e:
             logger.warning(f"ERA5 Fehler fuer {region_id}: {e} → Fallback")
-            sp        = solar_profile_fallback(n_hours)
+            sp = solar_profile_fallback(n_hours)
             solar_src = "Fallback"
     else:
-        sp        = solar_profile_fallback(n_hours)
+        sp = solar_profile_fallback(n_hours)
         solar_src = "Fallback"
 
     sts = pd.Series(sp, index=snapshots)
 
     # ✅ Solar: capital_cost in EUR/MW/a
-    n.add("Generator", f"solar_{region_id}",
-          bus=bus_name,
-          carrier="solar",
-          p_nom_extendable=True,
-          p_nom_max=float("inf"),
-          p_max_pu=sts,
-          capital_cost=cfg["solar_capex"] * 1000 * annuity_factor,
-          marginal_cost=0.01)
+    n.add(
+        "Generator",
+        f"solar_{region_id}",
+        bus=bus_name,
+        carrier="solar",
+        p_nom_extendable=True,
+        p_nom_max=float("inf"),
+        p_max_pu=sts,
+        capital_cost=cfg["solar_capex"] * 1000 * annuity_factor,
+        marginal_cost=0.01,
+    )
 
     # ✅ Batterie: capital_cost in EUR/MW/a
-    n.add("StorageUnit", f"battery_{region_id}",
-          bus=bus_name,
-          carrier="battery",
-          p_nom_extendable=True,
-          max_hours=cfg["battery_max_hours"],
-          capital_cost=cfg["battery_capex_kwh"] * 1000 * cfg["battery_max_hours"] * annuity_factor,
-          marginal_cost=1.0,
-          efficiency_store=0.95,
-          efficiency_dispatch=0.95,
-          cyclic_state_of_charge=True)
+    n.add(
+        "StorageUnit",
+        f"battery_{region_id}",
+        bus=bus_name,
+        carrier="battery",
+        p_nom_extendable=True,
+        max_hours=cfg["battery_max_hours"],
+        capital_cost=cfg["battery_capex_kwh"]
+        * 1000
+        * cfg["battery_max_hours"]
+        * annuity_factor,
+        marginal_cost=1.0,
+        efficiency_store=0.95,
+        efficiency_dispatch=0.95,
+        cyclic_state_of_charge=True,
+    )
 
     # ✅ Diesel: capital_cost in EUR/MW/a
-    n.add("Generator", f"diesel_{region_id}",
-          bus=bus_name,
-          carrier="diesel",
-          p_nom_extendable=True,
-          capital_cost=cfg["diesel_capex"] * 1000 * annuity_factor,
-          marginal_cost=cfg["diesel_marginal"])
+    n.add(
+        "Generator",
+        f"diesel_{region_id}",
+        bus=bus_name,
+        carrier="diesel",
+        p_nom_extendable=True,
+        capital_cost=cfg["diesel_capex"] * 1000 * annuity_factor,
+        marginal_cost=cfg["diesel_marginal"],
+    )
 
     # Load Shedding – Sicherheit
-    n.add("Generator", f"shedding_{region_id}",
-          bus=bus_name,
-          carrier="load_shedding",
-          p_nom=1e6,
-          p_nom_extendable=False,
-          marginal_cost=cfg["shedding_cost"])
+    n.add(
+        "Generator",
+        f"shedding_{region_id}",
+        bus=bus_name,
+        carrier="load_shedding",
+        p_nom=1e6,
+        p_nom_extendable=False,
+        marginal_cost=cfg["shedding_cost"],
+    )
 
     logger.info(f"  {region_id}: Bus + Solar + Batterie + Diesel [{solar_src}]")
     return solar_src
@@ -358,6 +407,7 @@ def add_offgrid_bus(n, region_id, population, centroid_x, centroid_y,
 # ══════════════════════════════════════════════════════
 # HILFSFUNKTIONEN – Ergebnisse auswerten
 # ══════════════════════════════════════════════════════
+
 
 def extract_results(n, offgrid_df, cfg, annuity_factor):
     """
@@ -371,24 +421,26 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
     for _, row in offgrid_df.iterrows():
         rid = row["gadm_id"]
         try:
-            solar_cap_mw   = n.generators.loc[f"solar_{rid}", "p_nom_opt"]
+            solar_cap_mw = n.generators.loc[f"solar_{rid}", "p_nom_opt"]
             battery_cap_mw = n.storage_units.loc[f"battery_{rid}", "p_nom_opt"]
-            diesel_cap_mw  = n.generators.loc[f"diesel_{rid}", "p_nom_opt"]
-            solar_gen_mwh  = n.generators_t.p[f"solar_{rid}"].sum()
+            diesel_cap_mw = n.generators.loc[f"diesel_{rid}", "p_nom_opt"]
+            solar_gen_mwh = n.generators_t.p[f"solar_{rid}"].sum()
             diesel_gen_mwh = n.generators_t.p[f"diesel_{rid}"].sum()
 
             # Kapazitaeten in kW fuer CSV
-            solar_cap_kw   = solar_cap_mw   * 1000
+            solar_cap_kw = solar_cap_mw * 1000
             battery_cap_kw = battery_cap_mw * 1000
-            diesel_cap_kw  = diesel_cap_mw  * 1000
+            diesel_cap_kw = diesel_cap_mw * 1000
 
             # CAPEX Berechnung (EUR, kW-Basis)
-            capex_solar   = solar_cap_kw   * cfg["solar_capex"]
-            capex_battery = battery_cap_kw * cfg["battery_max_hours"] * cfg["battery_capex_kwh"]
-            capex_diesel  = diesel_cap_kw  * cfg["diesel_capex"]
-            capex_total   = capex_solar + capex_battery + capex_diesel
-            opex_yr       = (capex_solar + capex_battery) * 0.01
-            capex_ann     = capex_total * annuity_factor
+            capex_solar = solar_cap_kw * cfg["solar_capex"]
+            capex_battery = (
+                battery_cap_kw * cfg["battery_max_hours"] * cfg["battery_capex_kwh"]
+            )
+            capex_diesel = diesel_cap_kw * cfg["diesel_capex"]
+            capex_total = capex_solar + capex_battery + capex_diesel
+            opex_yr = (capex_solar + capex_battery) * 0.01
+            capex_ann = capex_total * annuity_factor
             total_cost_yr = capex_ann + opex_yr
 
             # Gesamtlast [MWh/yr]
@@ -399,37 +451,41 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
 
             # ✅ Autarkie [%] – Solar-Anteil an Gesamterzeugung (max 100%)
             total_gen_mwh = solar_gen_mwh + diesel_gen_mwh
-            autarky = (solar_gen_mwh / total_gen_mwh * 100) if total_gen_mwh > 0 else 0.0
+            autarky = (
+                (solar_gen_mwh / total_gen_mwh * 100) if total_gen_mwh > 0 else 0.0
+            )
 
             # ✅ CO2 [t/yr]
             co2_t = diesel_gen_mwh * cfg["diesel_co2"]
 
             # Netzanschluss Kosten (zum Vergleich)
-            grid_capex    = row["distance_km"] * 15000 + 35000
+            grid_capex = row["distance_km"] * 15000 + 35000
             grid_total_yr = grid_capex * annuity_factor + grid_capex * 0.03
             offgrid_cheaper = total_cost_yr < grid_total_yr
 
-            rows.append({
-                "region":             rid,
-                "population":         row["population"],
-                "distance_km":        row["distance_km"],
-                "elec_rate":          row["elec_rate"],
-                "elec_source":        row["elec_source"],
-                "solar_kw":           round(solar_cap_kw, 1),
-                "battery_kw":         round(battery_cap_kw, 1),
-                "battery_kwh":        round(battery_cap_kw * cfg["battery_max_hours"], 1),
-                "diesel_kw":          round(diesel_cap_kw, 1),
-                "capex_total_keur":   round(capex_total / 1000, 1),
-                "total_cost_keur_yr": round(total_cost_yr / 1000, 1),
-                "grid_capex_keur":    round(grid_capex / 1000, 1),
-                "grid_total_keur_yr": round(grid_total_yr / 1000, 1),
-                "offgrid_cheaper":    offgrid_cheaper,
-                "lcoe_eur_kwh":       round(lcoe, 3),
-                "autarky_pct":        round(autarky, 1),
-                "co2_t_yr":           round(co2_t, 2),
-                "centroid_x":         row["centroid_x"],
-                "centroid_y":         row["centroid_y"],
-            })
+            rows.append(
+                {
+                    "region": rid,
+                    "population": row["population"],
+                    "distance_km": row["distance_km"],
+                    "elec_rate": row["elec_rate"],
+                    "elec_source": row["elec_source"],
+                    "solar_kw": round(solar_cap_kw, 1),
+                    "battery_kw": round(battery_cap_kw, 1),
+                    "battery_kwh": round(battery_cap_kw * cfg["battery_max_hours"], 1),
+                    "diesel_kw": round(diesel_cap_kw, 1),
+                    "capex_total_keur": round(capex_total / 1000, 1),
+                    "total_cost_keur_yr": round(total_cost_yr / 1000, 1),
+                    "grid_capex_keur": round(grid_capex / 1000, 1),
+                    "grid_total_keur_yr": round(grid_total_yr / 1000, 1),
+                    "offgrid_cheaper": offgrid_cheaper,
+                    "lcoe_eur_kwh": round(lcoe, 3),
+                    "autarky_pct": round(autarky, 1),
+                    "co2_t_yr": round(co2_t, 2),
+                    "centroid_x": row["centroid_x"],
+                    "centroid_y": row["centroid_y"],
+                }
+            )
         except Exception as e:
             logger.warning(f"Auswertung fehlgeschlagen fuer {rid}: {e}")
 
@@ -441,10 +497,7 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
 # ══════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s:%(name)s:%(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
     # ── Snakemake oder direkt aufrufen ────────────────────────────────
     if "snakemake" not in dir():
@@ -453,44 +506,51 @@ if __name__ == "__main__":
         class MockSnakemake:
             class input:
                 network = sorted(
-                    [f for f in glob.glob("results/networks/*.nc")
-                     if "offgrid" not in f]
+                    [
+                        f
+                        for f in glob.glob("results/networks/*.nc")
+                        if "offgrid" not in f
+                    ]
                 )[-1]
-                shapes    = "resources/shapes/gadm_shapes.geojson"
-                cutout    = "cutouts/cutout-2013-era5.nc"
+                shapes = "resources/shapes/gadm_shapes.geojson"
+                cutout = "cutouts/cutout-2013-era5.nc"
                 # Generisch: Liste von CSV-Dateien fuer alle Laender
                 elec_data = glob.glob("data/elec_rates/*_electricity_access.csv")
+
             class output:
                 network = "results/networks/elec_with_offgrid.nc"
-                csv     = "results/offgrid_results.csv"
+                csv = "results/offgrid_results.csv"
+
             class log:
-                python  = "logs/build_offgrid.log"
+                python = "logs/build_offgrid.log"
+
             config = {
                 "offgrid": {
-                    "enable":            True,
-                    "use_c1_distance":   True,
-                    "use_c2_elec_rate":  True,
-                    "use_c3_pop_density":True,
-                    "use_c4_low_load":   False,
+                    "enable": True,
+                    "use_c1_distance": True,
+                    "use_c2_elec_rate": True,
+                    "use_c3_pop_density": True,
+                    "use_c4_low_load": False,
                     "use_c5_congestion": False,
-                    "max_distance_km":   50,
-                    "max_elec_rate":     0.50,
-                    "min_pop_density":   10,
-                    "c4_max_load_mw":    20.0,
-                    "c5_line_loading":   0.50,
+                    "max_distance_km": 50,
+                    "max_elec_rate": 0.50,
+                    "min_pop_density": 10,
+                    "c4_max_load_mw": 20.0,
+                    "c5_line_loading": 0.50,
                     "kwh_per_person_yr": 60,
-                    "solar_capex":       800,
+                    "solar_capex": 800,
                     "battery_capex_kwh": 250,
                     "battery_max_hours": 6,
-                    "diesel_capex":      400,
-                    "diesel_marginal":   300,
-                    "diesel_co2":        0.27,
-                    "shedding_cost":     5000,
-                    "solver":            "gurobi",
-                    "discount_rate":     0.08,
-                    "asset_lifetime":    20,
+                    "diesel_capex": 400,
+                    "diesel_marginal": 300,
+                    "diesel_co2": 0.27,
+                    "shedding_cost": 5000,
+                    "solver": "gurobi",
+                    "discount_rate": 0.08,
+                    "asset_lifetime": 20,
                 }
             }
+
         snakemake = MockSnakemake()
         logger.info("Direkter Aufruf – MockSnakemake aktiv")
 
@@ -513,22 +573,21 @@ if __name__ == "__main__":
     # Quelle: ESMAP Mini Grid Design Manual (2019)
     _r = cfg["discount_rate"]
     _n = cfg["asset_lifetime"]
-    annuity_factor = _r * (1 + _r)**_n / ((1 + _r)**_n - 1)
-    logger.info(f"Annuitätsfaktor: {annuity_factor:.4f} "
-                f"(r={_r*100:.0f}%, n={_n}yr)")
+    annuity_factor = _r * (1 + _r) ** _n / ((1 + _r) ** _n - 1)
+    logger.info(
+        f"Annuitätsfaktor: {annuity_factor:.4f} " f"(r={_r*100:.0f}%, n={_n}yr)"
+    )
 
     # ── Schritt 1: Netzwerk laden ─────────────────────────────────────
     logger.info(f"Lade Netzwerk: {snakemake.input.network}")
-    n         = pypsa.Network(snakemake.input.network)
+    n = pypsa.Network(snakemake.input.network)
     snapshots = n.snapshots
-    n_hours   = len(snapshots)
+    n_hours = len(snapshots)
     logger.info(f"  {len(n.buses)} Busse | {n_hours} Zeitschritte")
 
-    buses    = n.buses[["x", "y"]].copy()
+    buses = n.buses[["x", "y"]].copy()
     bus_geom = gpd.GeoDataFrame(
-        buses,
-        geometry=gpd.points_from_xy(buses.x, buses.y),
-        crs="EPSG:4326"
+        buses, geometry=gpd.points_from_xy(buses.x, buses.y), crs="EPSG:4326"
     )
 
     # C4: Last pro Bus
@@ -542,12 +601,10 @@ if __name__ == "__main__":
     # C5: Leitungsauslastung
     bus_max_line_loading = {}
     if len(n.lines_t.p0.columns) > 0 and len(n.lines) > 0:
-        s_nom = (n.lines.s_nom_opt if "s_nom_opt" in n.lines.columns
-                 else n.lines.s_nom)
+        s_nom = n.lines.s_nom_opt if "s_nom_opt" in n.lines.columns else n.lines.s_nom
         line_loading = (n.lines_t.p0.abs() / s_nom).max()
         for line_name, loading in line_loading.items():
-            for bus in [n.lines.loc[line_name, "bus0"],
-                        n.lines.loc[line_name, "bus1"]]:
+            for bus in [n.lines.loc[line_name, "bus0"], n.lines.loc[line_name, "bus1"]]:
                 bus_max_line_loading[bus] = max(
                     bus_max_line_loading.get(bus, 0.0), loading
                 )
@@ -560,9 +617,7 @@ if __name__ == "__main__":
     # ── Schritt 3: Elektrifizierungsdaten laden ───────────────────────
     # Generisch: alle CSV-Dateien in snakemake.input.elec_data laden
     logger.info("Lade Elektrifizierungsdaten...")
-    elec_data, national_avg = load_all_electrification_data(
-        snakemake.input.elec_data
-    )
+    elec_data, national_avg = load_all_electrification_data(snakemake.input.elec_data)
 
     # ── Schritt 4: ERA5 Cutout laden ─────────────────────────────────
     cutout = None
@@ -577,20 +632,35 @@ if __name__ == "__main__":
 
     # ── Schritt 5: Geo-Logik ──────────────────────────────────────────
     logger.info("Geo-Logik: Offgrid-Counties identifizieren...")
-    logger.info(f"  C1 (Abstand > {cfg['max_distance_km']} km):    "
-                f"{'aktiv' if cfg['use_c1_distance'] else 'INAKTIV'}")
-    logger.info(f"  C2 (Elec < {cfg['max_elec_rate']*100:.0f}%):         "
-                f"{'aktiv' if cfg['use_c2_elec_rate'] else 'INAKTIV'}")
-    logger.info(f"  C3 (Dichte > {cfg['min_pop_density']} P/km2):  "
-                f"{'aktiv' if cfg['use_c3_pop_density'] else 'INAKTIV'}")
-    logger.info(f"  C4 (Last < {cfg['c4_max_load_mw']} MW):        "
-                f"{'aktiv' if cfg['use_c4_low_load'] else 'INAKTIV'}")
-    logger.info(f"  C5 (Auslastung > {cfg['c5_line_loading']*100:.0f}%): "
-                f"{'aktiv (Szenario C)' if cfg['use_c5_congestion'] else 'INAKTIV (Szenario A)'}")
+    logger.info(
+        f"  C1 (Abstand > {cfg['max_distance_km']} km):    "
+        f"{'aktiv' if cfg['use_c1_distance'] else 'INAKTIV'}"
+    )
+    logger.info(
+        f"  C2 (Elec < {cfg['max_elec_rate']*100:.0f}%):         "
+        f"{'aktiv' if cfg['use_c2_elec_rate'] else 'INAKTIV'}"
+    )
+    logger.info(
+        f"  C3 (Dichte > {cfg['min_pop_density']} P/km2):  "
+        f"{'aktiv' if cfg['use_c3_pop_density'] else 'INAKTIV'}"
+    )
+    logger.info(
+        f"  C4 (Last < {cfg['c4_max_load_mw']} MW):        "
+        f"{'aktiv' if cfg['use_c4_low_load'] else 'INAKTIV'}"
+    )
+    logger.info(
+        f"  C5 (Auslastung > {cfg['c5_line_loading']*100:.0f}%): "
+        f"{'aktiv (Szenario C)' if cfg['use_c5_congestion'] else 'INAKTIV (Szenario A)'}"
+    )
 
     offgrid_df = identify_offgrid_counties(
-        shapes, bus_geom, bus_load_mw, bus_max_line_loading,
-        elec_data, national_avg, cfg
+        shapes,
+        bus_geom,
+        bus_load_mw,
+        bus_max_line_loading,
+        elec_data,
+        national_avg,
+        cfg,
     )
     logger.info(f"  → {len(offgrid_df)} Offgrid-Counties identifiziert")
 
@@ -610,24 +680,26 @@ if __name__ == "__main__":
     n_added = 0
 
     for _, row in offgrid_df.iterrows():
-        rid    = row["gadm_id"]
+        rid = row["gadm_id"]
         result = add_offgrid_bus(
-            n              = n,
-            region_id      = rid,
-            population     = row["population"],
-            centroid_x     = row["centroid_x"],
-            centroid_y     = row["centroid_y"],
-            cfg            = cfg,
-            cutout         = cutout,
-            annuity_factor = annuity_factor,
-            snapshots      = snapshots,
+            n=n,
+            region_id=rid,
+            population=row["population"],
+            centroid_x=row["centroid_x"],
+            centroid_y=row["centroid_y"],
+            cfg=cfg,
+            cutout=cutout,
+            annuity_factor=annuity_factor,
+            snapshots=snapshots,
         )
         if result is not None:
             n_added += 1
 
     logger.info(f"  → {n_added} Busse hinzugefuegt")
-    logger.info(f"  → Netzwerk: {len(n.buses)} Busse total "
-                f"({len(buses)} Hauptnetz + {n_added} Offgrid)")
+    logger.info(
+        f"  → Netzwerk: {len(n.buses)} Busse total "
+        f"({len(buses)} Hauptnetz + {n_added} Offgrid)"
+    )
 
     # ── Schritt 8: Netzwerk speichern ────────────────────────────────
     os.makedirs(os.path.dirname(snakemake.output.network), exist_ok=True)
@@ -650,7 +722,9 @@ if __name__ == "__main__":
         logger.info(f"  Mini-Grids:        {len(results_df)}")
         logger.info(f"  Gesamtbevölkerung: {results_df['population'].sum():,}")
         logger.info(f"  Gesamt Solar:      {results_df['solar_kw'].sum():.0f} kW")
-        logger.info(f"  Ø LCOE:            {results_df['lcoe_eur_kwh'].mean():.3f} EUR/kWh")
+        logger.info(
+            f"  Ø LCOE:            {results_df['lcoe_eur_kwh'].mean():.3f} EUR/kWh"
+        )
         logger.info(f"  Ø Autarkie:        {results_df['autarky_pct'].mean():.1f}%")
         logger.info(f"  Gesamt CO2:        {results_df['co2_t_yr'].sum():.1f} t/Jahr")
         logger.info(f"  Ergebnisse:        {snakemake.output.csv}")
