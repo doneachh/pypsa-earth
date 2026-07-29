@@ -413,9 +413,9 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
     """
     Liest Optimierungsergebnisse fuer alle Offgrid-Busse aus.
 
-    LCOE:    total_cost_yr / total_load_mwh / 1000  [EUR/kWh]
+    LCOE:    (CAPEX_ann + OPEX + Brennstoff) / total_load_mwh / 1000  [EUR/kWh]
     Autarkie: solar_gen / (solar_gen + diesel_gen)   [%]
-    CO2:     diesel_gen_mwh * diesel_co2             [t/yr]
+    CO2:     diesel_gen_mwh / eta * EF_Brennstoff    [t/yr]
     """
     rows = []
     for _, row in offgrid_df.iterrows():
@@ -424,8 +424,11 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
             solar_cap_mw = n.generators.loc[f"solar_{rid}", "p_nom_opt"]
             battery_cap_mw = n.storage_units.loc[f"battery_{rid}", "p_nom_opt"]
             diesel_cap_mw = n.generators.loc[f"diesel_{rid}", "p_nom_opt"]
-            solar_gen_mwh = n.generators_t.p[f"solar_{rid}"].sum()
-            diesel_gen_mwh = n.generators_t.p[f"diesel_{rid}"].sum()
+            # Energie = Leistung x snapshot_weighting (p ist Leistung in MW)
+            w = n.snapshot_weightings.generators
+            solar_gen_mwh = (n.generators_t.p[f"solar_{rid}"] * w).sum()
+            diesel_gen_mwh = (n.generators_t.p[f"diesel_{rid}"] * w).sum()
+            shed_mwh = (n.generators_t.p[f"shedding_{rid}"] * w).sum()
 
             # Kapazitaeten in kW fuer CSV
             solar_cap_kw = solar_cap_mw * 1000
@@ -441,7 +444,8 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
             capex_total = capex_solar + capex_battery + capex_diesel
             opex_yr = (capex_solar + capex_battery) * 0.01
             capex_ann = capex_total * annuity_factor
-            total_cost_yr = capex_ann + opex_yr
+            fuel_cost_yr = diesel_gen_mwh * cfg["diesel_marginal"]  # EUR/yr
+            total_cost_yr = capex_ann + opex_yr + fuel_cost_yr
 
             # Gesamtlast [MWh/yr]
             total_load_mwh = row["population"] * cfg["kwh_per_person_yr"] / 1000
@@ -455,8 +459,8 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
                 (solar_gen_mwh / total_gen_mwh * 100) if total_gen_mwh > 0 else 0.0
             )
 
-            # ✅ CO2 [t/yr]
-            co2_t = diesel_gen_mwh * cfg["diesel_co2"]
+            # ✅ CO2 [t/yr]: MWh_el / eta = MWh_Brennstoff, x Emissionsfaktor
+            co2_t = diesel_gen_mwh / cfg["diesel_efficiency"] * cfg["diesel_co2"]
 
             # Netzanschluss Kosten (zum Vergleich)
             grid_capex = row["distance_km"] * 15000 + 35000
@@ -481,6 +485,9 @@ def extract_results(n, offgrid_df, cfg, annuity_factor):
                     "offgrid_cheaper": offgrid_cheaper,
                     "lcoe_eur_kwh": round(lcoe, 3),
                     "autarky_pct": round(autarky, 1),
+                    "diesel_gen_mwh": round(diesel_gen_mwh, 2),
+                    "shed_mwh": round(shed_mwh, 2),
+                    "unserved_pct": round(shed_mwh / total_load_mwh * 100, 3),
                     "co2_t_yr": round(co2_t, 2),
                     "centroid_x": row["centroid_x"],
                     "centroid_y": row["centroid_y"],
@@ -544,9 +551,10 @@ if __name__ == "__main__":
                     "diesel_capex": 400,
                     "diesel_marginal": 300,
                     "diesel_co2": 0.27,
+                    "diesel_efficiency": 0.38,
                     "shedding_cost": 5000,
                     "solver": "gurobi",
-                    "discount_rate": 0.08,
+                    "discount_rate": 0.071,
                     "asset_lifetime": 20,
                 }
             }
@@ -570,12 +578,12 @@ if __name__ == "__main__":
     logger.info("=" * 60)
 
     # ── Annuitätsfaktor ───────────────────────────────────────────────
-    # Quelle: ESMAP Mini Grid Design Manual (2019)
+    # PyPSA-Earth config.default.yaml
     _r = cfg["discount_rate"]
     _n = cfg["asset_lifetime"]
     annuity_factor = _r * (1 + _r) ** _n / ((1 + _r) ** _n - 1)
     logger.info(
-        f"Annuitätsfaktor: {annuity_factor:.4f} " f"(r={_r*100:.0f}%, n={_n}yr)"
+        f"Annuitätsfaktor: {annuity_factor:.4f} " f"(r={_r*100:.1f}%, n={_n}yr)"
     )
 
     # ── Schritt 1: Netzwerk laden ─────────────────────────────────────

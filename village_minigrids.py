@@ -65,7 +65,7 @@ warnings.filterwarnings("ignore")
 CONFIG = {
     # Dateipfade
     "shapes_file": "resources/shapes/gadm_shapes.geojson",
-    "network_pattern": "results/networks/*.nc",
+    "network_pattern": "results/networks/elec_s_47_ec_lcopt_Co2L-3h.nc",
     "cutout_file": "cutouts/cutout-2013-era5.nc",
     "elec_data_dir": "data/elec_rates",
     "worldpop_file": "data/WorldPop/ken_ppp_2020_UNadj_constrained.tif",
@@ -79,11 +79,11 @@ CONFIG = {
     "use_c4_low_load": False,
     "c4_max_load_mw": 20.0,
     # Siedlungs-Clustering (WorldPop → Dörfer)
-    "min_pop_per_cell": 5,  # Mindest-Bevoelkerung pro WorldPop-Zelle
-    "min_village_pop": 1000,  # Mindest-Bevoelkerung pro Dorf-Cluster
-    "max_village_pop": 50000,  # Max-Bevoelkerung pro Dorf-Cluster
+    "min_pop_per_cell": 10,  # Mindest-Bevoelkerung pro WorldPop-Zelle
+    "min_village_pop": 700,  # Mindest-Bevoelkerung pro Dorf-Cluster
+    "max_village_pop": 15000,  # Max-Bevoelkerung pro Dorf-Cluster
     "cluster_radius_km": 3.0,  # DBSCAN: Radius fuer Nachbarschaft [km]
-    "cluster_min_cells": 2,  # DBSCAN: Mindestanzahl Zellen pro Cluster
+    "cluster_min_cells": 4,  # DBSCAN: Mindestanzahl Zellen pro Cluster
     # Nachfrage
     "kwh_per_person_yr": 60,  # Quelle: Osiolo et al. (2019)
     # Technologie CAPEX (Overnight-Kosten in EUR/kW bzw. EUR/kWh)
@@ -94,6 +94,7 @@ CONFIG = {
     "diesel_capex": 400,  # EUR/kW  – PyPSA technology-data
     "diesel_marginal": 300,  # EUR/MWh – PyPSA marginal_cost Einheit
     "diesel_co2": 0.27,  # t CO2/MWh_el – IPCC Guidelines 2006
+    "diesel_efficiency": 0.30,  # el.Wirkungsgrad kleingenerator
     "shedding_cost": 5000,  # EUR/MWh – PyPSA marginal_cost Einheit
     "solver": "gurobi",
     # Kapazitaetsbegrenzungen
@@ -107,7 +108,16 @@ CONFIG = {
     "discount_rate": 0.071,  # 7,1%
     "asset_lifetime": 20,  # Jahre
     # Ziel-Counties fuer Optimierung
-    "target_counties": ["KE.37_1"],
+    "target_counties": [
+        "KE.37_1",
+        "KE.8_1",
+        "KE.18_1",
+        "KE.7_1",
+        "KE.24_1",
+        "KE.27_1",
+        "KE.43_1",
+        "KE.46_1",
+    ],
 }
 
 
@@ -322,7 +332,7 @@ def build_minigrid(
     Umrechnungen:
       - Last:          kW / 1000 = MW
       - capital_cost:  EUR/kW × 1000 × annuity_factor = EUR/MW/a
-      - LCOE:          n.objective [EUR/a] / lts.sum() [MWh/a] / 1000 = EUR/kWh
+      - LCOE:          (CAPEX_ann + OPEX + Brennstoff) [EUR/a] / Last [MWh/a] / 1000 = EUR/kWh
     """
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2013-01-01", periods=8760, freq="h"))
@@ -614,13 +624,13 @@ print(f"\n[4/5] Tech-Logik: {len(villages_df)} Mini-Grids optimieren...")
 test_villages = villages_df
 results = []
 
-# Annuitätsfaktor – Quelle: ESMAP Mini Grid Design Manual (2019)
+# Annuitätsfaktor – Quelle: PyPSA_Earth config.default.yaml (discountrate: 0.071)
 _r = CONFIG["discount_rate"]
 _n = CONFIG["asset_lifetime"]
-annuity_factor = _r * (1 + _r) ** _n / ((1 + _r) ** _n - 1)  # ≈ 0.1019
+annuity_factor = _r * (1 + _r) ** _n / ((1 + _r) ** _n - 1)  # ≈ 0.0951
 print(
     f"      Annuitätsfaktor: {annuity_factor:.4f} "
-    f"(r={CONFIG['discount_rate']*100:.0f}%, n={CONFIG['asset_lifetime']} Jahre)"
+    f"(r={CONFIG['discount_rate']*100:.1f}%, n={CONFIG['asset_lifetime']} Jahre)"
 )
 
 for i, row in test_villages.iterrows():
@@ -653,15 +663,16 @@ for i, row in test_villages.iterrows():
         # Erzeugung in MWh/yr
         solar_gen_mwh = n.generators_t.p[f"solar_{vid}"].sum()  # MWh/yr
         diesel_gen_mwh = n.generators_t.p[f"diesel_{vid}"].sum()  # MWh/yr
+        shed_mwh = n.generators_t.p[f"shedding_{vid}"].sum()  # MWh/yr
 
         # load_ts in MW → .sum() ergibt MWh/yr
         total_load_mwh = load_ts.sum()  # MWh/yr
 
-        # LCOE: n.objective [EUR/yr] / total_load [MWh/yr] = EUR/MWh → /1000 = EUR/kWh
-        lcoe = n.objective / total_load_mwh / 1000  # EUR/kWh
         total_gen_mwh = solar_gen_mwh + diesel_gen_mwh
         autarky = (solar_gen_mwh / total_gen_mwh * 100) if total_gen_mwh > 0 else 0.0
-        co2_t = diesel_gen_mwh * CONFIG["diesel_co2"]  # t CO2/yr
+        co2_t = (
+            diesel_gen_mwh / CONFIG["diesel_efficiency"] * CONFIG["diesel_co2"]
+        )  # t CO2/yr
 
         # Manuelle CAPEX-Berechnung (kW-Basis) zur Verifikation mit Netzkosten
         capex_solar = solar_cap_kw * CONFIG["solar_capex"]
@@ -672,7 +683,12 @@ for i, row in test_villages.iterrows():
         capex_total = capex_solar + capex_battery + capex_diesel
         opex_total = (capex_solar + capex_battery) * 0.01  # 1% OPEX/yr
         capex_ann = capex_total * annuity_factor
-        total_cost_yr = capex_ann + opex_total
+        fuel_cost_yr = diesel_gen_mwh * CONFIG["diesel_marginal"]
+        total_cost_yr = capex_ann + opex_total + fuel_cost_yr
+
+        # LCOE [EUR/kWh] = EUR/yr / MWh/yr / 1000
+        lcoe = total_cost_yr / total_load_mwh / 1000
+        lcoe_lp = n.objective / total_load_mwh / 1000  # LP objective, Kontrolle
 
         # Netzanschluss Kosten
         grid_line = row["dist_km"] * CONFIG["grid_line_cost_per_km"]
@@ -698,6 +714,10 @@ for i, row in test_villages.iterrows():
                 "diesel_kw": round(diesel_cap_kw, 2),
                 "lcoe_eur_kwh": round(lcoe, 3),
                 "autarky_pct": round(autarky, 1),
+                "lcoe_lp_eur_kwh": round(lcoe_lp, 3),
+                "shed_mwh": round(shed_mwh, 3),
+                "unserved_pct": round(shed_mwh / total_load_mwh * 100, 3),
+                "diesel_gen_mwh": round(diesel_gen_mwh, 3),
                 "co2_t_yr": round(co2_t, 3),
                 "capex_total_eur": round(capex_total, 0),
                 "total_cost_eur_yr": round(total_cost_yr, 0),
