@@ -24,32 +24,36 @@ chdir_to_root_dir()
 
 run_name_prefix = "scenarios_H2G" # Experiment name
 
-sdir = Path.cwd() / "results"/ f"{run_name_prefix}_summary_v2"
+sdir = Path.cwd() / "results"/ f"{run_name_prefix}_summary_v4"
 sdir.mkdir(exist_ok=True, parents=True)
 
 run_names = [
     "H2G_A_CD_2035",
+    "H2G_A_DZ_2035",
+    "H2G_A_EG_2035", 
+    "H2G_A_ET_2035",
+    "H2G_A_GH_2035",
+    "H2G_A_KE_2035",
+    "H2G_A_MA_2035",
+    "H2G_A_MR_2035",
+    "H2G_A_NA_2035",
+    "H2G_A_NG_2035",
+    "H2G_A_TN_2035",
+    "H2G_A_TZ_2035",
+    "H2G_A_ZA_2035", 
     "H2G_A_CD_2050",
-    # "H2G_A_EG_2035", 
-    # "H2G_A_EG_2050", 
-    # "H2G_A_ET_2035",
-    # "H2G_A_ET_2050",
-    # "H2G_A_GH_2035",
-    # "H2G_A_GH_2050",
-    # "H2G_A_KE_2035",
-    # "H2G_A_KE_2050",
-    # "H2G_A_MA_2035",
-    # "H2G_A_MA_2050",
-    # "H2G_A_NA_2035",
-    # "H2G_A_NA_2050",
-    # "H2G_A_NG_2035",
-    # "H2G_A_NG_2050",
-    # "H2G_A_TN_2035",
-    # "H2G_A_TN_2050",
-    # "H2G_A_TZ_2035",
-    # "H2G_A_TZ_2050",
-    # "H2G_A_ZA_2035", 
-    # "H2G_A_ZA_2050"
+    "H2G_A_DZ_2050",
+    "H2G_A_EG_2050", 
+    "H2G_A_ET_2050",
+    "H2G_A_GH_2050",
+    "H2G_A_KE_2050",
+    "H2G_A_MA_2050",
+    "H2G_A_MR_2050",
+    "H2G_A_NA_2050",
+    "H2G_A_NG_2050",
+    "H2G_A_TN_2050",
+    "H2G_A_TZ_2050",
+    "H2G_A_ZA_2050"
 ]
 
 #%%
@@ -163,6 +167,8 @@ for run_name in run_names:
 
 nc_files = pd.DataFrame(nc_files_data).set_index(cols) if nc_files_data else pd.DataFrame(columns=cols + ["file"]).set_index(cols)
 
+nc_files = nc_files.query("sopts == '1H'")
+
 if nc_files.empty:
     raise ValueError("No files found for the given run names and wildcards. Please check the configurations and file names.")
 
@@ -171,13 +177,15 @@ if nc_files.empty:
 # initialise dicts per metric (market balance, optimal capacities, costs, marginal prices) with dataframes per bus_carrier or other groups
 
 balance_dict = init_stats_dict(nc_files, keys=[
-    "AC", "H2", "oil", "gas", "co2 stored", "co2", "biogas",
-    # , "methanol", "NH3", "steel", "HBI" "freshwater" "solid biomass",
+    "AC", "H2", "oil", "gas", "co2 stored", "co2", "biogas","solid biomass",
+    # , "methanol", "NH3", "steel", "HBI" "freshwater" 
     ], name="bus_carrier")
 
 optimal_capacity_dict = init_stats_dict(nc_files, keys=["AC", "H2"], name="bus_carrier") #, "methanol", "NH3", "steel", "HBI"
 
 costs_dict = init_stats_dict(nc_files, keys=["capex", "opex"], name="costs")
+
+load_shedding = init_stats_dict(nc_files, keys=["load_shedding"], name="bus_carrier")
 
 load_avg_marginal_price = pd.DataFrame(index=nc_files.index, columns=["H2 export bus"]) #"H2 export", , "FT export", "NH3 export"
 load_avg_marginal_price.columns.name = "bus" # NB: this is spatially resolved.
@@ -189,6 +197,14 @@ pypsa.options.params.statistics.round = 6
 for nc_files_idx in nc_files.index:
     
     n = pypsa.Network(nc_files.at[nc_files_idx,"file"])
+
+    ds = (
+        n.stats.energy_balance(
+            carrier="load shedding", 
+            groupby="bus_carrier",     
+            aggregate_across_components=True)
+    ).round(1).loc[lambda x: x > 0]
+    load_shedding["load_shedding"].loc[nc_files_idx, ds.index] = ds.values
 
     # energy balance per bus_carrier in TWh
     for bus_carrier in balance_dict.keys():
@@ -299,6 +315,7 @@ to_csv_nafix(nc_files, sdir / "nc_files.csv")
 save_stats_dict(balance_dict, "balance_dict", sdir)
 save_stats_dict(optimal_capacity_dict, "optimal_capacity_dict", sdir)
 save_stats_dict(costs_dict, "costs_dict", sdir)
+save_stats_dict(load_shedding, "load_shedding", sdir)
 
 to_csv_nafix(load_avg_marginal_price, sdir / "load_avg_marginal_price.csv")
 print(f"Saved load_avg_marginal_price to {sdir / 'load_avg_marginal_price.csv'}")

@@ -397,7 +397,7 @@ renewable:
 costs:
   year: 2050
   technology_data_version: v0.13.2
-  discountrate: [0.1046] #, 0.086, 0.071] --> https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2023/May/IRENA_The_cost_of_financing_renewable_power_2023.pdf
+  discountrate: [0.1277] #, 0.086, 0.071] --> https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2023/May/IRENA_The_cost_of_financing_renewable_power_2023.pdf
   country_specific_data: "" # (optional) Reference to the desired technology-data directory for techno-economic input data; Only "" and "US" supported, for other values check the technology-data output directory
   # Only needed if "US" is selected as `country_specific_data`, otherwise ignore
   cost_scenario: "moderate" # only used if `country_specific_data: "US"`; can be "moderate", "advanced" or "conservative"
@@ -416,7 +416,7 @@ costs:
     investment: 0
     lifetime: 25
     CO2 intensity: 0
-    discount rate: 0.1046
+    discount rate: 0.1277
   marginal_cost: # EUR/MWh
     solar: 0.01
     onwind: 0.015

@@ -15,7 +15,7 @@ summary_dir: results/
 foresight: overnight # TODO: csp, myopic, monte carlo in szenario A zeigen
 
 
-countries: ["TN"]
+countries: ["ET"]
 # TODO per country: Insert country you want to model "EG", "NA", "MA", "ZA", "KE", "ET", "CG", "TZ", "GH", "TN", "NG"
 # Can be replaced by country ["NG", "BJ"], continent ["Africa"] or user-specific region, see more at https://pypsa-earth.readthedocs.io/en/latest/configuration.html#top-level-configuration
 
@@ -37,8 +37,8 @@ enable:
 custom_rules: [] # Default empty [] or link to custom rule file e.g. ["my_folder/my_rules.smk"] that add rules to Snakefile
 
 run:
-  name: "H2G_A_TN_2050" # use this to keep track of runs with different settings
-  sector_name: "H2G_A_TN_2050" # use this to keep track of sector scenario runs
+  name: "H2G_A_ET_2035" # use this to keep track of runs with different settings
+  sector_name: "H2G_A_ET_2035" # use this to keep track of sector scenario runs
   shared_cutouts: true # set to true to share the default cutout(s) across runs
   # Note: value false requires build_cutout to be enabled
   allow_scenario_failure: false # If True, the workflow will continue even if a scenario in run_scnenario fails
@@ -47,10 +47,10 @@ scenario:
   simpl: [""]
   ll: ["copt"]
   clusters: [10]
-  opts: [Co2L0.1] # TODO per country: adjust factor (e.g. Co2L0.8 for 2035) and co2base (see below) per country and planning_horizon based on excel file
+  opts: [Co2L0.6] # Co2L0.25 TODO per country: adjust factor (e.g. Co2L0.8 for 2035) and co2base (see below) per country and planning_horizon based on excel file
   planning_horizons: # investment years for myopic and perfect; or costs year for overnight
-  # - 2035
-  - 2050
+  - 2035
+  # - 2050
   sopts:
   - "1H"
   demand:
@@ -163,7 +163,7 @@ base_network:
 load_options:
   ssp: "ssp2-2.6" # shared socio-economic pathway (GDP and population growth) scenario to consider
   weather_year: 2013 # Load scenarios available with different weather year (different renewable potentials)
-  prediction_year: 2050 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon
+  prediction_year: 2030 # Load scenarios available with different prediction year (GDP, population) # TODO: adjust per planning horizon
   scale: 1 # scales all load time-series, i.e. 2 = doubles load
 
 co2_budget:
@@ -183,7 +183,7 @@ electricity:
   base_voltage: 380.
   voltages: [132., 220., 300., 380., 500., 750.]
   co2limit: 7.75e+7 # European default, 0.05 * 3.1e9*0.5, needs to be adjusted for Africa
-  co2base: 3.0718e+7 # TODO per country: adjust using excel file and value for 2015 based on https://edgar.jrc.ec.europa.eu/dataset_ghg2024.
+  co2base: 1.3510e+7 # TODO per country: adjust using excel file and value for 2015 based on https://edgar.jrc.ec.europa.eu/dataset_ghg2024.
   agg_p_nom_limits: # enables to set country-wise maximum and minimum generation capacities for generators (e.g. renewables, nuclear, and geothermal)
     file: data/agg_p_nom_minmax.csv # path to csv file containing country-wise generation capacity limits
     include_existing: false # false: only new built capacities are constrained; true: existing capacities are accounted in the constraints
@@ -204,7 +204,7 @@ electricity:
   extendable_carriers:
       # Note: For landlocked countries (e.g., Jordan, Austria, Switzerland), remove 'offwind-ac' and 'offwind-dc'
           # from the Generator list below, as these offshore wind technologies require coastline access.
-    Generator: [solar, onwind, offwind-ac, offwind-dc, OCGT]
+    Generator: [solar, onwind, OCGT]
     StorageUnit: [] # battery, H2
     Store: [battery, H2]
     Link: [] # H2 pipeline
@@ -213,7 +213,7 @@ electricity:
   custom_powerplants: false #  "false" use only powerplantmatching (ppm) data, "merge" combines ppm and custom powerplants, "replace" use only custom powerplants
 
   conventional_carriers: [nuclear, oil, OCGT, CCGT, coal, lignite, geothermal, biomass]
-  renewable_carriers: [solar, onwind, offwind-ac, offwind-dc, hydro]
+  renewable_carriers: [solar, onwind, hydro] # ET IS A LANDLOCKED COUNTRY, SO NO OFFSHORE WIND
 
   estimate_renewable_capacities:
     stats: "irena" # False, = greenfield expansion, 'irena' uses IRENA stats to add expansion limits
@@ -395,9 +395,9 @@ renewable:
 # TODO: Needs to be adjusted for Africa.
 # Costs Configuration
 costs:
-  year: 2050
+  year: 2035
   technology_data_version: v0.13.2
-  discountrate: [0.1046] #, 0.086, 0.071] --> https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2023/May/IRENA_The_cost_of_financing_renewable_power_2023.pdf
+  discountrate: [0.1172] #, 0.086, 0.071] --> https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2023/May/IRENA_The_cost_of_financing_renewable_power_2023.pdf
   country_specific_data: "" # (optional) Reference to the desired technology-data directory for techno-economic input data; Only "" and "US" supported, for other values check the technology-data output directory
   # Only needed if "US" is selected as `country_specific_data`, otherwise ignore
   cost_scenario: "moderate" # only used if `country_specific_data: "US"`; can be "moderate", "advanced" or "conservative"
@@ -416,7 +416,7 @@ costs:
     investment: 0
     lifetime: 25
     CO2 intensity: 0
-    discount rate: 0.1046
+    discount rate: 0.1172
   marginal_cost: # EUR/MWh
     solar: 0.01
     onwind: 0.015
@@ -511,7 +511,7 @@ export:
   endogenous_price: 400 # EUR/MWh # Market price, for wich the hydrogen for endogenous exports is sold. Only considered, if ["export"]["endogenous"] is set to true.
   store: true # [True, False] # specifies whether an export store to balance demand is implemented
   store_capital_costs: "no_costs" # ["standard_costs", "no_costs"] # specifies the costs of the export store. "standard_costs" takes CAPEX of "hydrogen storage tank type 1 including compressor"
-  h2export: [23.33, 78.33, 133.32] # Yearly export demand in TWh. Only considered, if ["export"]["endogenous"] is set to false
+  h2export: [3.33, 13.33, 23.33] # Yearly export demand in TWh. Only considered, if ["export"]["endogenous"] is set to false
   # Assumptions: Africas market-based export potential (shipped and piped) is 4 to 10 MtH2 by 2035 and 35(6) to 50 MtH2 via different products by 2050. (cf. Deloitte2023, HydrogenCouncil2024, HydrogenCouncil2022, IRENA2023) 
   # 0.1 Mtpa: 3.33 TWh/a and about 1GW of electrolyser capacity as a lower bound for 2035.
   # 0.4 Mtpa: 13.33 TWh/a and about 3GW of electrolyser capacity as a lower bound for 2035.
@@ -623,7 +623,7 @@ sector:
       - offshore
     aqueduct_water_stress_classification: # ["above_40"] # If "True" then the water stress classification is used to determine the water availability for desalination
     hydrogen_colors: false
-    water_network: true # WHAT ABOUT ETHIOPIA WITH NO COASTLINE? There is one bus with water stress factor >40, rest below 40.
+    water_network: false # WHAT ABOUT ETHIOPIA WITH NO COASTLINE? There is one bus with water stress factor >40, rest below 40.
     custom_water_network: false
     ratio_water_hydrogen: 13 # liters of water per kg of hydrogen, see: https://www.plugpower.com/wp-content/uploads/2021/10/EX-4250D_F041122.pdf
     set_color_shares: false
@@ -699,9 +699,9 @@ sector:
 
   biomass_transport: false # biomass transport between nodes
   biomass_transport_default_cost: 0.1 #EUR/km/MWh
-  solid_biomass_potential: 203  # TWh/a, Potential of whole modelled area 
+  solid_biomass_potential: 468.3 # TWh/a, Potential of whole modelled area 
   # TODO per country: conservative assumptions is to take 97% of biofuel/bioenergy from https://unstats.un.org/unsd/energystats/dataPortal/, divide value by 3600 TJ/TWh
-  biogas_potential: 0.4 # TWh/a, Potential of whole modelled area 
+  biogas_potential: 14.5 # TWh/a, Potential of whole modelled area 
   # TODO per country: conservative assumptions is to take 3% of biofuel/bioenergy from https://unstats.un.org/unsd/energystats/dataPortal/, divide value by 3600 TJ/TWh
 
   efficiency_heat_oil_to_elec: 0.9
