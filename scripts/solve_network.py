@@ -114,26 +114,71 @@ def get_load_shedding_capacity(n, safety_margin=1.2):
         Required p_nom per bus for load shedding.
     """
 
-    load_shedding_p_nom = pd.Series(0.0, index=n.buses.index)
+    load_profiles = get_as_dense(n, "Load", "p_set")
+    load_by_bus = load_profiles.T.groupby(n.loads.bus).sum().T
+    co2_buses = n.buses.index[n.buses.carrier.isin(["co2", "co2 stored"])]
+    load_by_bus = load_by_bus.drop(columns=co2_buses, errors="ignore")
 
-    for bus_name, bus_loads in n.loads.groupby("bus"):
+    # Load shedding can cover positive demand only. Negative-only buses, such
+    # as process-emission or CO2 buses, must not receive negative capacities.
+    load_shedding_p_nom = (
+        load_by_bus.max(axis=0).clip(lower=0.0) * safety_margin
+    )
 
-        if not n.loads_t.p_set.empty:
-            bus_load_timeseries = n.loads_t.p_set[
-                bus_loads.index.intersection(n.loads_t.p_set.columns)
-            ]
-            # Sum loads across all components at this bus for each snapshot
-            total_load_per_snapshot = bus_load_timeseries.sum(axis=1)
-            max_total_load = total_load_per_snapshot.max()
-        else:
-            max_total_load = bus_loads["p_set"].sum()
+    return load_shedding_p_nom.reindex(n.buses.index, fill_value=0.0)
 
-        required_p_nom = max_total_load * safety_margin
 
-        load_shedding_p_nom[bus_name] = required_p_nom
+def check_exogenous_co2_budget(n, config):
+    """Check whether exogenous emissions can fit within the CO2 budget."""
+    if "CO2Limit" not in n.global_constraints.index:
+        return
 
-    return load_shedding_p_nom
+    emission_loads = n.loads.index[
+        n.loads.bus.eq("co2 atmosphere")
+        | n.loads.carrier.astype("string").str.contains("emissions", na=False)
+    ]
+    if emission_loads.empty:
+        return
 
+    emission_profiles = get_as_dense(
+        n, "Load", "p_set", inds=emission_loads
+    ).clip(upper=0.0)
+    weights = n.snapshot_weightings.generators.reindex(emission_profiles.index)
+    emissions_by_load = (-emission_profiles).mul(weights, axis=0).sum(axis=0)
+    exogenous_emissions = emissions_by_load.sum()
+
+    co2_limit = float(n.global_constraints.at["CO2Limit", "constant"])
+    sequestration_potential = n.meta.get(
+        "co2_sequestration_potential_override",
+        config.get("sector", {}).get("co2_sequestration_potential", 5),
+    )
+    sequestration_limit = float(sequestration_potential) * 1e6
+    minimum_atmospheric_emissions = max(
+        0.0, exogenous_emissions - sequestration_limit
+    )
+
+    if minimum_atmospheric_emissions > co2_limit:
+        largest_sources = emissions_by_load[emissions_by_load > 0].nlargest(5)
+        source_summary = ", ".join(
+            f"{name}={value * 1e-6:.2f} MtCO2/a"
+            for name, value in largest_sources.items()
+        )
+        raise ValueError(
+            "Exogenous CO2 emissions cannot satisfy the configured CO2 budget. "
+            f"Exogenous emissions={exogenous_emissions * 1e-6:.2f} MtCO2/a, "
+            f"sequestration limit={sequestration_limit * 1e-6:.2f} MtCO2/a, "
+            f"minimum atmospheric emissions={minimum_atmospheric_emissions * 1e-6:.2f} MtCO2/a, "
+            f"CO2 limit={co2_limit * 1e-6:.2f} MtCO2/a. "
+            f"Largest exogenous sources: {source_summary}."
+        )
+
+    logger.info(
+        "Exogenous CO2 budget check passed: %.2f MtCO2/a emissions, "
+        "%.2f MtCO2/a sequestration limit, %.2f MtCO2/a CO2 limit.",
+        exogenous_emissions * 1e-6,
+        sequestration_limit * 1e-6,
+        co2_limit * 1e-6,
+    )
 
 def prepare_network(n, solve_opts, config):
     if "clip_p_max_pu" in solve_opts:
@@ -151,15 +196,18 @@ def prepare_network(n, solve_opts, config):
     if solve_opts.get("load_shedding"):
         required_p_nom = get_load_shedding_capacity(n, safety_margin=1.2)
         n.add("Carrier", "load shedding", color="#dd2e23", nice_name="Load shedding")
+        load_shedding_buses = n.buses.index[
+            ~n.buses.carrier.isin(["co2", "co2 stored"])
+        ]
         n.madd(
             "Generator",
-            n.buses.index,
+            load_shedding_buses,
             " load shedding",
-            bus=n.buses.index,
+            bus=load_shedding_buses,
             carrier="load shedding",
             sign=1,
-            marginal_cost=solve_opts.get("load_shedding") * 1000,  # convert to Eur/MWh
-            p_nom=required_p_nom.reindex(n.buses.index, fill_value=0.5e6),
+            marginal_cost=solve_opts.get("load_shedding") * 1000,
+            p_nom=required_p_nom.reindex(load_shedding_buses, fill_value=0.5e6),
         )
 
     if solve_opts.get("noisy_costs"):
@@ -1117,6 +1165,8 @@ def solve_network(n, config, solving, **kwargs):
     n.config = config
     n.opts = opts
 
+    check_exogenous_co2_budget(n, config)
+
     if skip_iterations:
         status, condition = n.optimize(**kwargs)
     else:
@@ -1202,5 +1252,6 @@ if __name__ == "__main__":
     )
     n.meta = dict(snakemake.config, **dict(wildcards=dict(snakemake.wildcards)))
     n.export_to_netcdf(snakemake.output[0])
-    logger.info(f"Objective function: {n.objective}")
-    logger.info(f"Objective constant: {n.objective_constant}")
+    if hasattr(n, "objective"):
+        logger.info(f"Objective function: {n.objective}")
+        logger.info(f"Objective constant: {n.objective_constant}")

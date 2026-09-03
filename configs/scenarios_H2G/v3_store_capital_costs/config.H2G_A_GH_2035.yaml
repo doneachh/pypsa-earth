@@ -416,6 +416,7 @@ costs:
     investment: 0
     lifetime: 25
     CO2 intensity: 0
+    discount rate: 0.1046
   marginal_cost: # EUR/MWh
     solar: 0.01
     onwind: 0.015
@@ -846,6 +847,7 @@ solving:
       AggFill: 0
       PreDual: 0
       GURO_PAR_BARDENSETHRESH: 200
+      BarHomogeneous: 1 # Use homogeneous barrier if standard does not converge
     gurobi-numeric-focus:
       NumericFocus: 3 # Favour numeric stability over speed
       method: 2 # barrier

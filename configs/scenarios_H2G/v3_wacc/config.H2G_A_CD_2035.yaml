@@ -848,7 +848,7 @@ solving:
       Seed: 123
       AggFill: 0
       PreDual: 0
-      GURO_PAR_BARDENSETHRESH: 200
+      GURO_PAR_BARDENSETHRESH: 50
     gurobi-numeric-focus:
       NumericFocus: 3 # Favour numeric stability over speed
       method: 2 # barrier

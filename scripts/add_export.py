@@ -79,6 +79,8 @@ def add_export(n, hydrogen_buses_ports, export_profile):
     x_export = country_shape.geometry.centroid.x.min() - 2
     y_export = country_shape.geometry.centroid.y.max() + 2
 
+    export_h2 = float(snakemake.wildcards["h2export"]) * 1e6
+
     # add export bus
     n.add(
         "Bus",
@@ -96,7 +98,7 @@ def add_export(n, hydrogen_buses_ports, export_profile):
         names=hydrogen_buses_ports.index + " export",
         bus0=hydrogen_buses_ports.index,
         bus1="H2 export bus",
-        p_nom_extendable=True,
+        p_nom=export_h2 * 1e-1, # for numerical stability, set p_nom of EACH link to 10% of total export demand
     )
 
     export_links = n.links[n.links.index.str.contains("export")]
@@ -107,10 +109,14 @@ def add_export(n, hydrogen_buses_ports, export_profile):
     if snakemake.params.store == True:
         if snakemake.params.store_capital_costs == "no_costs":
             capital_cost = 0
+            e_nom = export_h2
+            e_nom_extendable = False
         elif snakemake.params.store_capital_costs == "standard_costs":
             capital_cost = costs.at[
                 "hydrogen storage tank type 1 including compressor", "fixed"
             ]
+            e_nom = 0
+            e_nom_extendable = True
         else:
             logger.error(
                 f"Value {snakemake.params.store_capital_costs} for ['export']['store_capital_costs'] is not valid"
@@ -120,9 +126,9 @@ def add_export(n, hydrogen_buses_ports, export_profile):
             "Store",
             "H2 export store",
             bus="H2 export bus",
-            e_nom_extendable=True,
+            e_nom=e_nom,
+            e_nom_extendable=e_nom_extendable,
             carrier="H2",
-            e_initial=0,  # actually not required, since e_cyclic=True
             marginal_cost=0,
             capital_cost=capital_cost,
             e_cyclic=True,
