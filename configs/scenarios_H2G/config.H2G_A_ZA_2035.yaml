@@ -53,6 +53,7 @@ scenario:
   #- 2050
   sopts:
   - "1H"
+  - "3H"
   demand:
   - "NZ"
 
