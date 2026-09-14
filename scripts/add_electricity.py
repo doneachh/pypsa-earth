@@ -1288,9 +1288,12 @@ if __name__ == "__main__":
         extendable_carriers,
         snakemake.params.length_factor,
     )
-    attach_hydro(
-        n, costs, ppl, snakemake.params.renewable["hydro"]["hydro_min_inflow_pu"]
-    )
+    if "hydro" in renewable_carriers:
+        attach_hydro(
+            n, costs, ppl, snakemake.params.renewable["hydro"]["hydro_min_inflow_pu"]
+        )
+    else:
+        logger.info("No hydro renewable carrier configured; skipping hydro attachment.")
 
     attach_existing_batteries(
         n,

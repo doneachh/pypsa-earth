@@ -290,6 +290,16 @@ Specifies the options to estimate future electricity demand (load). Different ye
 
 The snapshots date range (`snapshots\start` - `snapshots\end`) must be in the `weather_year`.
 
+### offgrid
+
+Optional isolated offgrid electricity systems can be added immediately before optimisation. When enabled, PyPSA-Earth keeps each final AC bus region's electricity load on-grid and adds an isolated offgrid bus with PV, battery storage, and oil backup. The optimiser chooses a fixed profile share of regional electricity demand for isolated local supply. If an access-rate CSV is provided, existing load is interpreted as served demand and scaled to total demand with `D_total = D_served / access_rate`.
+
+```yaml
+--8<-- "configtables/snippets/offgrid.yaml"
+```
+
+{{ read_csv('configtables/offgrid.csv') }}
+
 ### electricity
 
 Specifies the options for the rule `add_electricity`. This includes options across several features, including but not limited to: voltage levels, electricity carriers available, renewable capacity estimation, operational reserve, storage parameters. See the table below for more details.

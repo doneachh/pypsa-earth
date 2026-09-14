@@ -82,6 +82,7 @@ plotting:
     run of river: "#4adbc8"
     solar: "#f9d002"
     solar PV: "#f9d002"
+    offgrid solar: "#d6b100"
     solar thermal: "#ffef60"
     solar rooftop: "#ffef60"
     biomass: "#0c6013"
@@ -105,6 +106,7 @@ plotting:
     SMR: "#4F4F2F"
     SMR CC: "darkblue"
     oil: "#262626"
+    offgrid oil: "#2c2c2c"
     oil boiler: "#B5A642"
     oil emissions: "#666666"
     gas for industry: "#333333"
@@ -128,6 +130,7 @@ plotting:
     H2 liquefaction: "m"
     hydrogen storage: "#ea048a"
     battery: "slategray"
+    offgrid battery: "#6d8299"
     battery discharger: "slategray"
     battery charger: "slategray"
     EV battery storage: "slategray"
@@ -162,6 +165,9 @@ plotting:
     DC-DC: "#8a1caf"
     DC link: "#8a1caf"
     load: "#ff0000"
+    offgrid AC: "#555555"
+    offgrid demand: "#9b5d3a"
+    offgrid demand relief: "#b07d62"
     load shedding: "#ff0000"
     Electric load: "b"
     electricity: "k"
@@ -246,9 +252,15 @@ plotting:
     offwind-dc: Offshore Wind (DC)
     onwind: Onshore Wind
     solar: Solar
+    offgrid solar: Offgrid Solar
     PHS: Pumped Hydro Storage
     hydro: Reservoir & Dam
     battery: Battery Storage
+    offgrid battery: Offgrid Battery
+    offgrid oil: Offgrid Oil
+    offgrid AC: Offgrid Electricity
+    offgrid demand: Offgrid Demand
+    offgrid demand relief: Offgrid Demand Relief
     li-ion: Lithium-Ion Storage
     lfp: Lithium-Ion-LFP Storage
     vanadium: Vanadium-Redox-Flow Storage

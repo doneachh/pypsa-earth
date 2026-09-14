@@ -23,6 +23,9 @@ snapshots:
   start: "2013-03-1"
   end: "2013-03-7"
 
+offgrid:
+  enable: false
+
 
 osm:
   clean_osm_data:

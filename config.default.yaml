@@ -193,6 +193,16 @@ load_options:
   prediction_year: 2030 # Valid only if "gegis" used as a source
   scale: 1 # scales all load time-series, i.e. 2 = doubles load
 
+# ------------------- Offgrid electricity -------------------
+offgrid:
+  enable: false # When true, add isolated offgrid systems and let optimisation choose a fixed profile share of regional electricity demand for isolated local supply
+  access_rate_file: false # optional CSV with access_rate and either bus/region/name/node or country columns; missing buses default to full access
+  min_access_rate: 0.05 # lower bound used in D_total = D_served / access_rate
+  base_demand_year: false # optional previous load_options.prediction_year; demand at or below this profile stays fixed on-grid, only additional demand can be shifted offgrid
+  base_demand_file: false # optional demand_profiles-style CSV used instead of base_demand_year
+  demand_scaling_only: false # internal scenario-testing option: apply access-rate demand scaling without adding offgrid components
+  costs: false # false uses processed on-grid costs; alternatively set solar_capex, battery_capex_kwh, battery_max_hours, diesel_capex, diesel_marginal, discount_rate, asset_lifetime
+
 # ------------------- Electricity grid -------------------
 electricity:
   # ----------------- Electricity generation -------------------

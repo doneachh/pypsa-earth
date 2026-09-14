@@ -3,7 +3,6 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# -*- coding: utf-8 -*-
 """
 Solves linear optimal power flow for a network iteratively while updating
 reactances.
@@ -95,6 +94,13 @@ from pypsa.optimization.optimize import optimize
 logger = create_logger(__name__)
 pypsa.pf.logger.setLevel(logging.WARNING)
 
+OFFGRID_DEMAND_CARRIER = "offgrid demand"
+OFFGRID_DEMAND_RELIEF_CARRIER = "offgrid demand relief"
+OFFGRID_SOLAR_CARRIER = "offgrid solar"
+OFFGRID_DEMAND_SUFFIX = " offgrid demand"
+OFFGRID_DEMAND_RELIEF_SUFFIX = " offgrid demand relief"
+OFFGRID_SOLAR_SUFFIX = " offgrid solar"
+
 
 def get_load_shedding_capacity(n, safety_margin=1.2):
     """
@@ -131,6 +137,30 @@ def get_load_shedding_capacity(n, safety_margin=1.2):
         required_p_nom = max_total_load * safety_margin
 
         load_shedding_p_nom[bus_name] = required_p_nom
+
+    if not n.generators.empty and "carrier" in n.generators.columns:
+        offgrid_demands = n.generators.index[
+            n.generators.carrier.fillna("") == OFFGRID_DEMAND_CARRIER
+        ]
+        if len(offgrid_demands):
+            p_max_pu = get_as_dense(n, "Generator", "p_max_pu").reindex(
+                columns=offgrid_demands, fill_value=1.0
+            )
+            p_nom_upper = pd.to_numeric(
+                n.generators.loc[offgrid_demands, "p_nom_max"], errors="coerce"
+            ).replace([np.inf, -np.inf], np.nan)
+            p_nom_upper = p_nom_upper.fillna(
+                pd.to_numeric(
+                    n.generators.loc[offgrid_demands, "p_nom"], errors="coerce"
+                ).fillna(0.0)
+            )
+            possible_demand = p_max_pu.mul(p_nom_upper, axis=1).clip(lower=0.0)
+            for bus_name, generators in n.generators.loc[offgrid_demands].groupby(
+                "bus"
+            ):
+                if bus_name in load_shedding_p_nom.index:
+                    max_total_load = possible_demand[generators.index].sum(axis=1).max()
+                    load_shedding_p_nom[bus_name] += max_total_load * safety_margin
 
     return load_shedding_p_nom
 
@@ -1075,6 +1105,133 @@ def add_lossy_bidirectional_link_constraints(n: pypsa.components.Network) -> Non
     n.model.add_constraints(lhs == 0, name="Link-bidirectional_sync")
 
 
+def _offgrid_split_generator_pairs(n):
+    if n.generators.empty or "carrier" not in n.generators.columns:
+        return []
+
+    carriers = n.generators.carrier.fillna("")
+    relief = pd.Index(n.generators.index[carriers == OFFGRID_DEMAND_RELIEF_CARRIER])
+    demand = pd.Index(n.generators.index[carriers == OFFGRID_DEMAND_CARRIER])
+    if relief.empty and demand.empty:
+        return []
+    if relief.empty or demand.empty:
+        raise ValueError(
+            "Offgrid demand split requires both relief and demand generators."
+        )
+
+    def parents(names, suffix):
+        return pd.Series(
+            {name[: -len(suffix)]: name for name in names if name.endswith(suffix)}
+        )
+
+    relief_by_parent = parents(relief, OFFGRID_DEMAND_RELIEF_SUFFIX)
+    demand_by_parent = parents(demand, OFFGRID_DEMAND_SUFFIX)
+    common = relief_by_parent.index.intersection(demand_by_parent.index)
+
+    if len(common) != len(relief_by_parent) or len(common) != len(demand_by_parent):
+        missing_relief = demand_by_parent.index.difference(relief_by_parent.index)
+        missing_demand = relief_by_parent.index.difference(demand_by_parent.index)
+        messages = []
+        if len(missing_relief):
+            messages.append("missing relief: " + ", ".join(missing_relief[:5]))
+        if len(missing_demand):
+            messages.append("missing demand: " + ", ".join(missing_demand[:5]))
+        raise ValueError("Invalid offgrid demand split pairs; " + "; ".join(messages))
+
+    return [
+        (parent, relief_by_parent.at[parent], demand_by_parent.at[parent])
+        for parent in common
+    ]
+
+
+def has_offgrid_demand_split(n):
+    return bool(_offgrid_split_generator_pairs(n))
+
+
+def add_offgrid_demand_split_constraints(n, snapshots=None):
+    pairs = _offgrid_split_generator_pairs(n)
+    if not pairs:
+        return
+
+    p_nom = n.model["Generator-p_nom"]
+    parents = pd.Index([pair[0] for pair in pairs], name="offgrid_parent")
+    relief_names = pd.Index([pair[1] for pair in pairs])
+    demand_names = pd.Index([pair[2] for pair in pairs])
+
+    relief = (
+        p_nom.loc[relief_names]
+        .rename({"Generator-ext": "offgrid_parent"})
+        .assign_coords(offgrid_parent=parents)
+    )
+    demand = (
+        p_nom.loc[demand_names]
+        .rename({"Generator-ext": "offgrid_parent"})
+        .assign_coords(offgrid_parent=parents)
+    )
+
+    n.model.add_constraints(
+        relief - demand == 0, name="offgrid_demand_split_capacity_sync"
+    )
+    logger.info("Added offgrid demand split constraints for %s AC buses.", len(pairs))
+
+
+def add_offgrid_solar_potential_constraints(n, snapshots=None):
+    if n.generators.empty or "carrier" not in n.generators.columns:
+        return
+    if "Generator-p_nom" not in n.model.variables.data:
+        return
+
+    carriers = n.generators.carrier.fillna("")
+    offgrid_solar = pd.Index(
+        n.generators.index[
+            (carriers == OFFGRID_SOLAR_CARRIER)
+            & n.generators.index.to_series().str.endswith(OFFGRID_SOLAR_SUFFIX)
+        ]
+    )
+    if offgrid_solar.empty:
+        return
+
+    p_nom = n.model["Generator-p_nom"]
+    extendable = pd.Index(p_nom.indexes["Generator-ext"])
+    source_solar = n.generators.index[carriers == "solar"]
+    constraints_added = 0
+
+    for offgrid_generator in offgrid_solar.intersection(extendable):
+        parent = offgrid_generator[: -len(OFFGRID_SOLAR_SUFFIX)]
+        potential = pd.to_numeric(
+            pd.Series([n.generators.at[offgrid_generator, "p_nom_max"]]),
+            errors="coerce",
+        ).iloc[0]
+        if not np.isfinite(potential) or potential <= 0.0:
+            continue
+
+        ongrid_at_parent = pd.Index(
+            source_solar[n.generators.loc[source_solar, "bus"] == parent]
+        )
+        ongrid_extendable = ongrid_at_parent.intersection(extendable)
+        ongrid_fixed = ongrid_at_parent.difference(extendable)
+        fixed_capacity = pd.to_numeric(
+            n.generators.loc[ongrid_fixed, "p_nom"], errors="coerce"
+        ).fillna(0.0).sum()
+
+        limit = max(float(potential) - float(fixed_capacity), 0.0)
+        lhs = p_nom.loc[offgrid_generator]
+        for generator in ongrid_extendable:
+            lhs = lhs + p_nom.loc[generator]
+
+        n.model.add_constraints(
+            lhs <= limit,
+            name=f"offgrid_solar_potential_{constraints_added}",
+        )
+        constraints_added += 1
+
+    if constraints_added:
+        logger.info(
+            "Added shared on-grid/offgrid solar potential constraints for %s AC buses.",
+            constraints_added,
+        )
+
+
 def extra_functionality(n, snapshots):
     """
     Collects supplementary constraints which will be passed to
@@ -1085,6 +1242,19 @@ def extra_functionality(n, snapshots):
     """
     opts = n.opts
     config = n.config
+    has_offgrid_split = has_offgrid_demand_split(n)
+    if has_offgrid_split:
+        unsupported_opts = [
+            opt for opt in opts if any(token in opt for token in ("RES", "SAFE", "EQ"))
+        ]
+        if unsupported_opts:
+            raise NotImplementedError(
+                "Offgrid demand split is not yet compatible with solve options "
+                + ", ".join(unsupported_opts)
+                + ". These constraints currently read fixed Load components and "
+                "would not account for the endogenous on-grid/offgrid split."
+            )
+
     if "BAU" in opts and n.generators.p_nom_extendable.any():
         add_BAU_constraints(n, config)
     if "SAFE" in opts and n.generators.p_nom_extendable.any():
@@ -1092,6 +1262,12 @@ def extra_functionality(n, snapshots):
     if "CCL" in opts and n.generators.p_nom_extendable.any():
         add_CCL_constraints(n, config)
     reserve = config["electricity"].get("operational_reserve", {})
+    if has_offgrid_split and reserve.get("activate"):
+        raise NotImplementedError(
+            "Offgrid demand split is not yet compatible with operational reserve. "
+            "The reserve constraint currently reads fixed Load components and "
+            "would not account for the endogenous on-grid/offgrid split."
+        )
     if reserve.get("activate"):
         add_operational_reserve_margin(n, snapshots, config)
     for o in opts:
@@ -1103,6 +1279,8 @@ def extra_functionality(n, snapshots):
             add_EQ_constraints(n, o)
 
     add_battery_constraints(n)
+    add_offgrid_demand_split_constraints(n)
+    add_offgrid_solar_potential_constraints(n)
     add_lossy_bidirectional_link_constraints(n)
 
     if snakemake.config["sector"]["chp"]:

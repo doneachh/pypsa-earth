@@ -82,6 +82,7 @@ nav:
       - Augmented Line Connection: user-guide/rules-reference/create-network/augmented-line-connections.md
       - Add Extra Components: user-guide/rules-reference/create-network/add-extra-components.md
       - Prepare Network: user-guide/rules-reference/create-network/prepare-network.md
+      - Add Offgrid Components: user-guide/rules-reference/create-network/add-offgrid-components.md
     - Solving:
       - Overview: user-guide/rules-reference/solving/index.md
       - Solve Network: user-guide/rules-reference/solving/solve-network.md

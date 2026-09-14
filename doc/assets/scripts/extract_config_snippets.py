@@ -98,6 +98,7 @@ def main():
         "osm": ["osm"],
         "base_network": ["base_network"],
         "load_options": ["load_options"],
+        "offgrid": ["offgrid"],
         "electricity": ["electricity"],
         "lines": ["lines"],
         "links": ["links"],

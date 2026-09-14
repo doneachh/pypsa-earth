@@ -77,6 +77,81 @@ RESDIR = config["results_dir"].strip("/") + f"/{SECDIR}"
 ATLITE_NPROCESSES = config["atlite"].get("nprocesses", 4)
 
 
+def config_value_is_set(value):
+    return value not in [False, None] and not (
+        isinstance(value, str)
+        and value.strip().lower() in ["", "false", "none", "null"]
+    )
+
+
+offgrid_config = config.get("offgrid", {})
+offgrid_enable = config_value_is_set(offgrid_config.get("enable", False))
+offgrid_access_rate_file = offgrid_config.get("access_rate_file", False)
+offgrid_access_rate_inputs = (
+    {"access_rate_file": offgrid_access_rate_file}
+    if config_value_is_set(offgrid_access_rate_file)
+    else {}
+)
+offgrid_base_demand_file = offgrid_config.get("base_demand_file", False)
+offgrid_base_demand_year = offgrid_config.get("base_demand_year", False)
+offgrid_base_demand_profiles = (
+    "resources/"
+    + RDIR
+    + f"offgrid_base_demand_profiles_{offgrid_base_demand_year}.csv"
+    if config_value_is_set(offgrid_base_demand_year)
+    and not config_value_is_set(offgrid_base_demand_file)
+    else None
+)
+offgrid_base_load_options = dict(config["load_options"])
+if config_value_is_set(offgrid_base_demand_year):
+    offgrid_base_load_options["prediction_year"] = offgrid_base_demand_year
+offgrid_base_config = dict(config)
+offgrid_base_config["load_options"] = offgrid_base_load_options
+offgrid_base_demand_inputs = {}
+if config_value_is_set(offgrid_base_demand_file):
+    offgrid_base_demand_inputs = {"base_demand_profiles": offgrid_base_demand_file}
+elif offgrid_base_demand_profiles:
+    offgrid_base_demand_inputs = {
+        "base_demand_profiles": offgrid_base_demand_profiles,
+    }
+if offgrid_base_demand_inputs:
+    offgrid_base_demand_inputs["simplify_busmap"] = (
+        "resources/" + RDIR + "bus_regions/busmap_elec_s{simpl}.csv"
+    )
+    offgrid_base_demand_inputs["cluster_busmap"] = (
+        "resources/" + RDIR + "bus_regions/busmap_elec_s{simpl}_{clusters}.csv"
+    )
+
+ELEC_PREPARED_NETWORK = (
+    "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc"
+)
+ELEC_PREPARED_OFFGRID_NETWORK = (
+    "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_offgrid.nc"
+)
+ELEC_MONTE_NETWORK = (
+    "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{unc}.nc"
+)
+ELEC_MONTE_OFFGRID_NETWORK = (
+    "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{unc}_offgrid.nc"
+)
+SECTOR_EXPORT_NETWORK = (
+    RESDIR
+    + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_export.nc"
+)
+SECTOR_EXPORT_OFFGRID_NETWORK = (
+    RESDIR
+    + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_export_offgrid.nc"
+)
+SECTOR_BROWNFIELD_NETWORK = (
+    RESDIR
+    + "prenetworks-brownfield/elec_s{simpl}_{clusters}_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}.nc"
+)
+SECTOR_BROWNFIELD_OFFGRID_NETWORK = (
+    RESDIR
+    + "prenetworks-brownfield/elec_s{simpl}_{clusters}_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_offgrid.nc"
+)
+
+
 wildcard_constraints:
     simpl="[a-zA-Z0-9]*|all",
     clusters="[0-9]+(m|flex)?|all|min",
@@ -584,6 +659,39 @@ rule build_demand_profiles:
         "scripts/build_demand_profiles.py"
 
 
+if offgrid_base_demand_profiles:
+
+    rule build_offgrid_base_demand_profiles:
+        params:
+            snapshots=config["snapshots"],
+            load_options=offgrid_base_load_options,
+            countries=config["countries"],
+        input:
+            base_network="networks/" + RDIR + "base.nc",
+            regions="resources/" + RDIR + "bus_regions/regions_onshore.geojson",
+            load=branch(
+                offgrid_base_load_options.get("source", "gegis") in ["gegis", "ssp"],
+                get_load_paths_gegis("data", offgrid_base_config),
+                "data/demand/forecasts_on_historical_period.parquet",
+            ),
+            gadm_shapes="resources/" + RDIR + "shapes/gadm_shapes.geojson",
+        output:
+            offgrid_base_demand_profiles,
+        log:
+            "logs/"
+            + RDIR
+            + f"build_offgrid_base_demand_profiles_{offgrid_base_demand_year}.log",
+        benchmark:
+            "benchmarks/"
+            + RDIR
+            + f"build_offgrid_base_demand_profiles_{offgrid_base_demand_year}"
+        threads: 1
+        resources:
+            mem_mb=3000,
+        script:
+            "scripts/build_demand_profiles.py"
+
+
 def inputs_hydro(w):
     if w.technology == "hydro":
         HYDRO_PROFILES = {
@@ -955,7 +1063,7 @@ rule prepare_network:
         ),
         tech_costs="resources/" + RDIR + f"costs_{config['costs']['year']}_elec.csv",
     output:
-        "networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
+        ELEC_PREPARED_NETWORK,
     log:
         "logs/" + RDIR + "prepare_network/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.log",
     benchmark:
@@ -969,6 +1077,38 @@ rule prepare_network:
         mem_mb=4000,
     script:
         "scripts/prepare_network.py"
+
+
+if offgrid_enable:
+
+    rule add_offgrid_components:
+        params:
+            offgrid=offgrid_config,
+            electricity=config["electricity"],
+            storage_techs=config["storage_techs"],
+            solving=config["solving"],
+            co2=config["co2"],
+            scope="electricity",
+            opts=lambda wildcards: wildcards.opts,
+            planning_horizon=config["costs"]["year"],
+        input:
+            network=ELEC_PREPARED_NETWORK,
+            costs="resources/" + RDIR + f"costs_{config['costs']['year']}_elec.csv",
+            **offgrid_access_rate_inputs,
+            **offgrid_base_demand_inputs,
+        output:
+            network=ELEC_PREPARED_OFFGRID_NETWORK,
+        log:
+            "logs/" + RDIR + "add_offgrid_components/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.log",
+        benchmark:
+            "benchmarks/"
+            + RDIR
+            + "add_offgrid_components/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}"
+        threads: 1
+        resources:
+            mem_mb=2000,
+        script:
+            "scripts/add_offgrid_components.py"
 
 
 def memory(w):
@@ -1003,7 +1143,11 @@ if config["monte_carlo"]["options"].get("add_to_snakefile", False) == False:
             augmented_line_connection=config["augmented_line_connection"],
             policy_config=config["policy_config"],
         input:
-            network="networks/" + RDIR + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
+            network=branch(
+                offgrid_enable,
+                ELEC_PREPARED_OFFGRID_NETWORK,
+                ELEC_PREPARED_NETWORK,
+            ),
             agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
         output:
             "results/" + RDIR + "networks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}.nc",
@@ -1056,12 +1200,48 @@ if config["monte_carlo"]["options"].get("add_to_snakefile", False) == True:
         script:
             "scripts/monte_carlo.py"
 
+    if offgrid_enable:
+
+        rule add_offgrid_components_monte:
+            params:
+                offgrid=offgrid_config,
+                electricity=config["electricity"],
+                storage_techs=config["storage_techs"],
+                solving=config["solving"],
+                co2=config["co2"],
+                scope="electricity",
+                opts=lambda wildcards: wildcards.opts,
+                planning_horizon=config["costs"]["year"],
+            input:
+                network=ELEC_MONTE_NETWORK,
+                costs="resources/"
+                + RDIR
+                + f"costs_{config['costs']['year']}_elec.csv",
+                **offgrid_access_rate_inputs,
+            output:
+                network=ELEC_MONTE_OFFGRID_NETWORK,
+            log:
+                "logs/"
+                + RDIR
+                + "add_offgrid_components/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{unc}.log",
+            benchmark:
+                "benchmarks/"
+                + RDIR
+                + "add_offgrid_components/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{unc}"
+            threads: 1
+            resources:
+                mem_mb=2000,
+            script:
+                "scripts/add_offgrid_components.py"
+
     rule solve_monte:
         input:
             expand(
-                "networks/"
-                + RDIR
-                + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{unc}.nc",
+                branch(
+                    offgrid_enable,
+                    ELEC_MONTE_OFFGRID_NETWORK,
+                    ELEC_MONTE_NETWORK,
+                ),
                 **config["scenario"],
             ),
 
@@ -1071,9 +1251,11 @@ if config["monte_carlo"]["options"].get("add_to_snakefile", False) == True:
             augmented_line_connection=config["augmented_line_connection"],
             policy_config=config["policy_config"],
         input:
-            network="networks/"
-            + RDIR
-            + "elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{unc}.nc",
+            network=branch(
+                offgrid_enable,
+                ELEC_MONTE_OFFGRID_NETWORK,
+                ELEC_MONTE_NETWORK,
+            ),
             agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
         output:
             "results/"
@@ -1429,10 +1611,42 @@ rule add_export:
         + RDIR
         + "bus_regions/regions_onshore_elec_s{simpl}_{clusters}.geojson",
     output:
-        RESDIR
-        + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_export.nc",
+        SECTOR_EXPORT_NETWORK,
     script:
         "scripts/add_export.py"
+
+
+if offgrid_enable:
+
+    rule add_offgrid_components_sector:
+        params:
+            offgrid=offgrid_config,
+            electricity=config["electricity"],
+            storage_techs=config["storage_techs"],
+            solving=config["solving"],
+            co2=config["co2"],
+            scope="sector",
+            opts=lambda wildcards: wildcards.opts,
+            planning_horizon=lambda wildcards: wildcards.planning_horizons,
+        input:
+            network=SECTOR_EXPORT_NETWORK,
+            costs="resources/" + RDIR + "costs_{planning_horizons}_sec.csv",
+            **offgrid_access_rate_inputs,
+            **offgrid_base_demand_inputs,
+        output:
+            network=SECTOR_EXPORT_OFFGRID_NETWORK,
+        log:
+            "logs/"
+            + SECDIR
+            + "add_offgrid_components/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}.log",
+        benchmark:
+            RESDIR
+            + "benchmarks/add_offgrid_components/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}"
+        threads: 1
+        resources:
+            mem_mb=2000,
+        script:
+            "scripts/add_offgrid_components.py"
 
 
 rule prepare_transport_data:
@@ -1849,8 +2063,11 @@ if config["foresight"] == "overnight":
             augmented_line_connection=config["augmented_line_connection"],
             policy_config=config["policy_config"],
         input:
-            network=RESDIR
-            + "prenetworks/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}_export.nc",
+            network=branch(
+                offgrid_enable,
+                SECTOR_EXPORT_OFFGRID_NETWORK,
+                SECTOR_EXPORT_NETWORK,
+            ),
             costs="resources/" + RDIR + "costs_{planning_horizons}_sec.csv",
             configs=SDIR + "configs/config.yaml",  # included to trigger copy_config rule
             agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)
@@ -2345,6 +2562,37 @@ if config["foresight"] == "myopic":
 
     ruleorder: add_existing_baseyear > add_brownfield
 
+    if offgrid_enable:
+
+        rule add_offgrid_components_myopic_sector:
+            params:
+                offgrid=offgrid_config,
+                electricity=config["electricity"],
+                storage_techs=config["storage_techs"],
+                solving=config["solving"],
+                co2=config["co2"],
+                scope="sector",
+                opts=lambda wildcards: wildcards.opts,
+                planning_horizon=lambda wildcards: wildcards.planning_horizons,
+            input:
+                network=SECTOR_BROWNFIELD_NETWORK,
+                costs="resources/" + RDIR + "costs_{planning_horizons}_sec.csv",
+                **offgrid_access_rate_inputs,
+                **offgrid_base_demand_inputs,
+            output:
+                network=SECTOR_BROWNFIELD_OFFGRID_NETWORK,
+            log:
+                RESDIR
+                + "logs/add_offgrid_components_elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}.log",
+            benchmark:
+                RESDIR
+                + "benchmarks/add_offgrid_components/elec_s{simpl}_{clusters}_ec_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}"
+            threads: 1
+            resources:
+                mem_mb=2000,
+            script:
+                "scripts/add_offgrid_components.py"
+
     rule solve_network_myopic:
         params:
             solving=config["solving"],
@@ -2356,8 +2604,11 @@ if config["foresight"] == "myopic":
             augmented_line_connection=config["augmented_line_connection"],
             policy_config=config["policy_config"],
         input:
-            network=RESDIR
-            + "prenetworks-brownfield/elec_s{simpl}_{clusters}_l{ll}_{opts}_{sopts}_{planning_horizons}_{discountrate}.nc",
+            network=branch(
+                offgrid_enable,
+                SECTOR_BROWNFIELD_OFFGRID_NETWORK,
+                SECTOR_BROWNFIELD_NETWORK,
+            ),
             costs="resources/" + RDIR + "costs_{planning_horizons}_sec.csv",
             configs=SDIR + "configs/config.yaml",  # included to trigger copy_config rule
             agg_p_nom_minmax=config["electricity"]["agg_p_nom_limits"]["file"],  # ensure the CSV with capacity constraints is copied into the shadow directory (needed on Windows, since shadowed scripts can’t access files outside `input`)

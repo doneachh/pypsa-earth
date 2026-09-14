@@ -25,6 +25,8 @@ The simplification `snakemake` rules prepare **approximations** of the full mode
 
 - **[prepare_network](prepare-network.md)** - Introduces optional constraints and requirements in the modelling, such as CO2 emissions, security margins, etc.
 
+- **[add_offgrid_components](add-offgrid-components.md)** - Optionally adds isolated offgrid electricity demand-share choices before optimisation.
+
 ## Reference
 
 The simplification and clustering steps are described in detail in the paper:
